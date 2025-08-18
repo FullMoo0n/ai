@@ -1,5 +1,20 @@
-from pydantic import BaseModel, Field
 from typing import List, Optional, Any
+from pydantic import BaseModel, Field
+
+
+
+
+class BoxedText(BaseModel):
+    text: str
+    box: List[int] = Field(..., description="[x1,y1,x2,y2]")
+
+
+class OCRResponse(BaseModel):
+    text: str
+    paragraphs: Optional[List[BoxedText]] = None
+    word_boxes: Optional[List[BoxedText]] = None
+    raw: Optional[dict] = None
+
 
 
 class OCRRequestParams(BaseModel):
