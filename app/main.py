@@ -130,14 +130,9 @@ async def sentences_endpoint(payload: SentencesRequest = Body(...)):
         raise HTTPException(status_code=400, detail="text 또는 paragraphs 중 하나는 필요합니다.")
 
     # 전체 원문
-    whole_text = payload.text or " ".join(payload.paragraphs or [])
+    whole_text = payload.text
     # 문장 분리
-    if payload.paragraphs:
-        sents = []
-        for para in payload.paragraphs:
-            sents.extend(split_sentences(para))
-    else:
-        sents = split_sentences(whole_text)
+    sents = split_sentences(whole_text)
 
     return SentencesResponse(text=whole_text, sentences=sents)
 
