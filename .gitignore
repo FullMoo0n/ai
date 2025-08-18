@@ -1,0 +1,84 @@
+.env
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+.eggs/
+*.manifest
+*.spec
+
+# ---- Virtual Environment ----
+.env
+.venv/
+venv/
+ENV/
+env/
+Pipfile.lock
+poetry.lock
+
+# ---- FastAPI / Uvicorn ----
+*.log
+*.db
+*.sqlite3
+
+# ---- Config / Secrets ----
+*.ini
+*.toml
+*.yaml
+*.yml
+.env.local
+.env.*.local
+.envrc
+/secrets/
+
+# ---- VSCode / PyCharm ----
+.vscode/
+.idea/
+*.iml
+
+# ---- OS Files ----
+.DS_Store
+Thumbs.db
+
+# ---- Docker ----
+/docker-compose.override.yml
+**/.dockerignore
+**/Dockerfile
+
+# ---- Tests / Coverage ----
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+pytest_cache/
+.pytest_cache/
+.pytest_results/
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# ---- Build / Dist ----
+build/
+dist/
+wheels/
+*.egg-info/
+*.egg
+.installed.cfg
+*.egg-info/
+
+# ---- Notebooks ----
+.ipynb_checkpoints
+*.ipynb
+
+# ---- Misc ----
+.mypy_cache/
+.pyre/
+.dmypy.json
+dmypy.json
