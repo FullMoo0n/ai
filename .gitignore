@@ -1,4 +1,10 @@
-.env
+# --- allow GitHub Actions workflows ---
+!.github/
+!.github/workflows/
+!.github/workflows/*.yml
+!.github/workflows/*.yaml
+
+
 # ---- Python ----
 __pycache__/
 *.py[cod]
@@ -28,8 +34,6 @@ poetry.lock
 # ---- Config / Secrets ----
 *.ini
 *.toml
-*.yaml
-*.yml
 .env.local
 .env.*.local
 .envrc
