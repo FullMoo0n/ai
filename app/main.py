@@ -2,10 +2,20 @@ from typing import List
 from io import BytesIO
 from pathlib import Path
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 from PIL import Image
+
+from .services.sentence_segmenter import split_sentences
+from .services.tokenizer import tokenize
+from .services.openai_eval import evaluate_segmentation_with_openai
+
+# 스키마
+from .schemas.sentences import SentencesRequest, SentencesResponse
+from .schemas.tokens import TokensRequest, TokensResponse
+from .schemas.validate import ValidateRequest, ValidateResponse
+
 
 from .schemas.ocr import OCRResponse
 from .services.vision_ocr import (
@@ -91,3 +101,50 @@ async def ocr_image(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"서버 오류: {e}")
+
+
+# --- 문장 분리 전용 ---
+@app.post("/sentences", response_model=SentencesResponse)
+async def sentences_endpoint(payload: SentencesRequest = Body(...)):
+    """
+    입력 텍스트(또는 문단 배열)를 문장 단위로만 분리
+    """
+    if not (payload.text or payload.paragraphs):
+        raise HTTPException(status_code=400, detail="text 또는 paragraphs 중 하나는 필요합니다.")
+
+    # 전체 원문
+    whole_text = payload.text or " ".join(payload.paragraphs or [])
+    # 문장 분리
+    if payload.paragraphs:
+        sents = []
+        for para in payload.paragraphs:
+            sents.extend(split_sentences(para))
+    else:
+        sents = split_sentences(whole_text)
+
+    return SentencesResponse(text=whole_text, sentences=sents)
+
+# --- 토큰화 전용 ---
+@app.post("/tokens", response_model=TokensResponse)
+async def tokens_endpoint(payload: TokensRequest = Body(...)):
+    """
+    문장 리스트를 받아 각 문장을 단어(토큰)로만 분리
+    (문장 분리는 이 엔드포인트에서 하지 않음)
+    """
+    if not payload.sentences:
+        raise HTTPException(status_code=400, detail="sentences가 비어있습니다.")
+    tokens_per_sentence = [tokenize(s) for s in payload.sentences]
+    return TokensResponse(tokens_per_sentence=tokens_per_sentence)
+
+
+@app.post("/sentences/validate", response_model=ValidateResponse)
+async def validate_sentences(payload: ValidateRequest = Body(...)):
+    try:
+        result = evaluate_segmentation_with_openai(
+            text=payload.text,
+            sentences=payload.sentences,
+            model="gpt-4.1-mini",
+        )
+        return ValidateResponse(**result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"OpenAI 검증 실패: {e}")
