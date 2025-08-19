@@ -35,6 +35,8 @@ from .services.vision_ocr import (
     extract_word_boxes,
     extract_paragraphs_spatial_proximity_advanced,
 )
+from .schemas.culture import CultureRequest, CultureResponse
+from .services.culture_api import get_sign_description
 from .schemas.veo import (
     VeoRequest, VeoResponse, ErrorResponse,
     VeoAsyncRequest, VeoAsyncResponse, VeoTaskStatus
@@ -130,7 +132,7 @@ async def sentences_endpoint(payload: SentencesRequest = Body(...)):
         raise HTTPException(status_code=400, detail="text 또는 paragraphs 중 하나는 필요합니다.")
 
     # 전체 원문
-    whole_text = payload.text
+    whole_text = payload.text or ""
     # 문장 분리
     sents = split_sentences(whole_text)
 
@@ -451,3 +453,67 @@ def cancel_veo_task(task_id: str):
         return {"message": f"작업 {task_id}이(가) 취소되었습니다."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"작업 취소 실패: {str(e)}")
+
+
+@app.post(
+    "/culture/sign-description",
+    response_model=CultureResponse,
+    responses={
+        200: {
+            "description": "수어 설명 조회 성공",
+            "model": CultureResponse,
+        },
+        400: {
+            "description": "잘못된 요청 (키워드 누락 등)",
+        },
+        500: {
+            "description": "서버 내부 오류 (API 키 누락, API 호출 실패 등)",
+        }
+    },
+    tags=["Culture API"],
+    summary="수어 설명 조회",
+    description="""
+    ## 키워드로 수어 설명을 조회합니다
+
+    한국문화정보원 API를 통해 입력된 키워드에 해당하는 수어의 설명을 가져옵니다.
+    검색 결과 중 첫 번째 항목의 signDescription을 반환합니다.
+
+    ### 요청 예시:
+    ```json
+    {
+        "keyword": "공주"
+    }
+    ```
+
+    ### 응답 예시:
+    ```json
+    {
+        "keyword": "공주",
+        "sign_description": "손등이 위로 향하게 편 왼손의 2지 옆면을 오른 주먹의 1·5지 끝으로 스쳐 올린 다음, 오른 주먹의 4지를 펴서 끝으로 배를 스쳐 내려 등이 위로 향하게 한다."
+    }
+    ```
+
+    ### 주의사항:
+    - CULTURE_API_KEY 환경변수가 설정되어 있어야 합니다
+    - 검색 결과가 없는 경우 sign_description은 null이 됩니다
+    """
+)
+async def get_culture_sign_description(request: CultureRequest):
+    """키워드로 수어 설명을 조회합니다."""
+    if not request.keyword or not request.keyword.strip():
+        raise HTTPException(status_code=400, detail="키워드가 필요합니다.")
+    
+    try:
+        sign_description = await get_sign_description(request.keyword.strip())
+        
+        return CultureResponse(
+            keyword=request.keyword.strip(),
+            sign_description=sign_description
+        )
+        
+    except ValueError as e:
+        # 환경변수 누락 등
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        # API 호출 실패 등
+        raise HTTPException(status_code=500, detail=f"수어 설명 조회 실패: {str(e)}")
