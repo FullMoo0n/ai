@@ -54,10 +54,10 @@ S3 업로드를 위한 환경 변수:
 
 ```bash
 # Docker Compose로 Redis 시작
-docker-compose up -d redis
+# docker-compose up -d redis
 
 # 또는 스크립트 사용
-./scripts/start_redis.sh
+# ./scripts/start_redis.sh
 ```
 
 ### 4. 서비스 시작

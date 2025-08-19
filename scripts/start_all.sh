@@ -7,9 +7,9 @@ echo ""
 cd "$(dirname "$0")/.."
 
 # Redis 시작
-echo "1. Redis 서버 시작..."
-docker-compose up -d redis
-sleep 3
+# echo "1. Redis 서버 시작..."
+# docker-compose up -d redis
+# sleep 3
 
 # 환경 변수 확인
 echo "2. 환경 변수 확인..."

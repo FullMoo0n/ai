@@ -15,5 +15,5 @@ COPY app ./app
 # 5. PYTHONPATH 환경변수 설정 (모듈 import를 위해)
 ENV PYTHONPATH=/app
 
-# 6. FastAPI 서버 실행
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# 6. Celery 워커를 백그라운드에서 실행한 후 FastAPI 서버 실행
+CMD bash -c "celery -A app.celery_app worker --loglevel=info & uvicorn app.main:app --host 0.0.0.0 --port 8000"
