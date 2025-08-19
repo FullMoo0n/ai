@@ -31,6 +31,7 @@ def split_sentences(text: str, split_on_newline: bool = False) -> List[str]:
         return []
     t = _normalize_spaces_keep_newline(text)
 
+
     # 문장 캡처
     raw_parts = _SENT_CAPTURE_RE.findall(t)
     parts: List[str] = []
