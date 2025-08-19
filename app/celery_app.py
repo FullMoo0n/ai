@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Redis URL 설정
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 
 # Celery 인스턴스 생성
 celery_app = Celery(
