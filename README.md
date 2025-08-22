@@ -8,10 +8,49 @@ Google Veo 3를 활용한 텍스트-to-비디오 생성 API와 OCR, 문장 분�
 - **문장 분리**: 텍스트를 문장 단위로 분리
 - **토큰화**: 문장을 단어 단위로 분리
 - **문장 검증**: OpenAI를 활용한 문장 분리 품질 검증
+- **문장 분석**: Google Gemini를 활용한 한국어 문장 형태소 분석
 - **비디오 생성**: Google Veo 3를 활용한 텍스트-to-비디오 생성 (동기/비동기)
 - **S3 업로드**: 생성된 비디오를 자동으로 AWS S3에 업로드
 
 ## 새로운 기능: 비동기 비디오 생성
+
+### Veo3 API 업데이트 (2024년 12월)
+Google의 새로운 Veo3 API 형식을 지원합니다:
+
+- **새로운 클라이언트**: `google.genai` 패키지 사용
+- **비동기 작업 처리**: `generate_videos` API로 비디오 생성 후 작업 완료 대기
+- **GCS 통합**: Google Cloud Storage에 직접 출력
+- **이미지 참조**: 선택적으로 참조 이미지 사용 가능
+
+#### Veo3 환경 변수 설정
+```bash
+# .env 파일에 추가
+VEO_API_KEY=your_google_api_key_here
+VEO_MODEL=veo-3.0-generate-preview
+VEO_OUTPUT_GCS_URI=gs://your-bucket/your-prefix
+```
+
+#### Veo3 API 사용 예시
+```python
+from app.services.veo_service import VeoService
+
+# 서비스 초기화
+veo_service = VeoService()
+
+# 기본 비디오 생성
+result = await veo_service.generate_sign_video(
+    prompt="한국어 수어로 '안녕하세요'를 표현하는 비디오를 생성해주세요",
+    aspect_ratio="16:9"
+)
+
+# 이미지 참조와 함께 비디오 생성
+result = await veo_service.generate_sign_video(
+    prompt="이 이미지를 참조하여 한국어 수어 비디오를 생성해주세요",
+    aspect_ratio="16:9",
+    image_gcs_uri="gs://your-bucket/reference-image.png",
+    output_gcs_uri="gs://your-bucket/output-videos/"
+)
+```
 
 ### 기존 문제점
 - Veo 3 비디오 생성 시 긴 대기 시간으로 인한 타임아웃 발생
@@ -40,7 +79,10 @@ cp .env.example .env
 ```
 
 필수 환경 변수:
-- `GOOGLE_API_KEY`: Google Gemini API 키 (Veo 비디오 생성용)
+- `VEO_API_KEY`: Google Veo3 API 키 (비디오 생성용)
+- `VEO_MODEL`: Veo3 모델명 (기본: veo-3.0-generate-preview)
+- `VEO_OUTPUT_GCS_URI`: 출력 비디오 GCS URI (예: gs://your-bucket/your-prefix)
+- `GOOGLE_API_KEY`: Google Gemini API 키 (Veo 비디오 생성 및 문장 분석용)
 - `OPENAI_API_KEY`: OpenAI API 키 (문장 검증용)
 - `REDIS_URL`: Redis 연결 URL (기본: redis://localhost:6379/0)
 
@@ -180,6 +222,48 @@ curl -X POST "http://localhost:8000/veo" \
     "timeout_seconds": 180
   }'
 ```
+
+### 문장 분석 (Gemini)
+
+Google Gemini API를 사용하여 한국어 문장을 분석하고 핵심 형태소를 추출합니다:
+
+```bash
+curl -X POST "http://localhost:8000/analyze-sentences" \
+  -H "Content-Type: application/json" \
+  -d '"내가 그랬어요! 텔레비전을 부순 건 바로 나예요!"'
+```
+
+응답:
+```json
+{
+  "success": true,
+  "input_text": "내가 그랬어요! 텔레비전을 부순 건 바로 나예요!",
+  "analysis_result": {
+    "내가 그랬어요!": ["나", "그렇"],
+    "텔레비전을 부순 건 바로 나예요!": ["텔레비전", "부수", "것", "바로", "나"]
+  },
+  "summary": {
+    "total_sentences": 2,
+    "total_morphemes": 7,
+    "sentence_details": {
+      "내가 그랬어요!": {
+        "morpheme_count": 2,
+        "morphemes": ["나", "그렇"]
+      },
+      "텔레비전을 부순 건 바로 나예요!": {
+        "morpheme_count": 5,
+        "morphemes": ["텔레비전", "부수", "것", "바로", "나"]
+      }
+    }
+  }
+}
+```
+
+**분석 규칙:**
+- 문장을 두 개로 분할: "내가 그랬어요!"와 "텔레비전을 부순 건 바로 나예요!"
+- 각 문장에서 핵심 형태소만 추출 (명사, 대명사, 동사/형용사 어간, 부사)
+- 조사(-가, -을)와 어미(-어요) 등 문법 요소는 제외
+- 동사 어간의 끝 하이픈(-) 제거
 
 ## 모니터링
 

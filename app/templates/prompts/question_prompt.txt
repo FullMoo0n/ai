@@ -1,0 +1,36 @@
+Create a sign language video showing a person performing Korean Sign Language (KSL) for the following question:
+
+"{{ sentence }}"
+
+Video Requirements:
+- Show a person from waist up performing sign language
+- Clear, natural hand movements and facial expressions
+- Questioning facial expressions with raised eyebrows and inquisitive look
+- Duration: 5-8 seconds
+- Good lighting with clear visibility of hands and face
+- Please don't put subtitles
+
+Sign Language Details:
+{% for item in sign_data %}
+- Word: "{{ item.word }}" - {{ item.description }}
+{% endfor %}
+
+Key Instructions for Questions:
+1. The signer should use appropriate questioning facial expressions
+2. Raised eyebrows to indicate interrogative mood
+3. Slight forward lean to show engagement
+4. Hand movements should be clear and precise
+5. Maintain questioning expression throughout the video
+6. End with a pause to indicate completion of question
+7. Eye contact should be maintained to establish connection
+
+Question-Specific Guidelines:
+- Use appropriate non-manual markers for questions
+- Facial expressions should clearly convey uncertainty or inquiry
+- Body language should be open and questioning
+- Pace should be slightly slower to emphasize the question
+
+Additional Context:
+This is a {{ sentence|length }} character question that asks: {{ sentence }}
+
+Please create a realistic video of Korean Sign Language interpretation for this question, emphasizing the interrogative nature. 

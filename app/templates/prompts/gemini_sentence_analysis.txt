@@ -1,0 +1,42 @@
+### **Prompt for Gemini**
+
+**[Objective]**
+Take the following Korean text, divide it into the two sentences I specify, analyze each sentence according to the rules, and output the result in a specific JSON format.
+
+**[Input Text]**
+
+{{input_data}}
+
+**[Procedure and Rules]**
+
+1.  **Sentence Segmentation**: Divide the input text into the two exact sentences specified below.
+      * First sentence: `내가 그랬어요!`
+      * Second sentence: `텔레비전을 부순 건 바로 나예요!`
+2.  **Core Morpheme Extraction**: For each segmented sentence, perform a morphological analysis and create a list by extracting only the core morphemes according to the following rules.
+3.  **Extraction Rules**:
+      * Include only the core content morphemes, such as nouns, pronouns, verb/adjective stems, and adverbs.
+      * **Exclude all** grammatical elements that start with a hyphen (-), such as particles (e.g., `-가`, `-을`) and endings (e.g., `-어요`).
+      * **You must also remove** the trailing hyphen (-) from verb stems (e.g., `그렇-` should become `그렇`, `부수-` should become `부수`).
+4.  **Output Format**:
+      * The final output must be a single JSON object.
+      * The **Keys** of the JSON object must be the two sentences specified in step 1.
+      * The **Value** for each key must be an array (list) of the cleaned, core morphemes extracted according to the rules in step 3, in their original order.
+
+**[Final Expected Output]**
+When all the above rules are applied, the expected final output is as follows:
+
+```json
+{
+  "내가 그랬어요!": [
+    "나",
+    "그렇"
+  ],
+  "텔레비전을 부순 건 바로 나예요!": [
+    "텔레비전",
+    "부수",
+    "것",
+    "바로",
+    "나"
+  ]
+}
+``` 
