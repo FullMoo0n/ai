@@ -1,0 +1,33 @@
+Create a sign language video showing a person performing Korean Sign Language (KSL) for the following text:
+
+"{{ sentence }}"
+
+Video Requirements:
+- Show a person from waist up performing sign language
+- Clear, natural hand movements and facial expressions
+- Appropriate facial expressions that match the content
+- Duration: 5-8 seconds
+- Please don't put subtitles.
+- Good lighting with clear visibility of hands and face
+
+Sign Language Details:
+{% if sign_data %}
+{% for item in sign_data %}
+- Word: "{{ item.word }}" - {{ item.description }}
+{% endfor %}
+{% else %}
+No specific sign language details provided. Please interpret the sentence naturally.
+{% endif %}
+
+General Instructions:
+1. The signer should appear natural and fluent
+2. Hand movements should be clear and precise
+3. Facial expressions should convey the meaning appropriately
+4. Maintain consistent signing speed throughout
+5. Ensure smooth transitions between signs
+6. The person should maintain appropriate eye contact
+
+Context:
+This is a {{ sentence|length }} character text that conveys: {{ sentence }}
+
+Please create a realistic video of Korean Sign Language interpretation for this content with natural and fluent signing. 

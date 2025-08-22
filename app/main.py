@@ -35,6 +35,9 @@ from .services.vision_ocr import (
     extract_word_boxes,
     extract_paragraphs_spatial_proximity_advanced,
 )
+from .schemas.culture import CultureRequest, CultureResponse
+from .services.culture_api import get_sign_description
+from .services.gemini_service import GeminiService
 from .schemas.veo import (
     VeoRequest, VeoResponse, ErrorResponse,
     VeoAsyncRequest, VeoAsyncResponse, VeoTaskStatus
@@ -130,7 +133,7 @@ async def sentences_endpoint(payload: SentencesRequest = Body(...)):
         raise HTTPException(status_code=400, detail="text 또는 paragraphs 중 하나는 필요합니다.")
 
     # 전체 원문
-    whole_text = payload.text
+    whole_text = payload.text or ""
     # 문장 분리
     sents = split_sentences(whole_text)
 
@@ -451,3 +454,453 @@ def cancel_veo_task(task_id: str):
         return {"message": f"작업 {task_id}이(가) 취소되었습니다."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"작업 취소 실패: {str(e)}")
+
+
+@app.post(
+    "/culture/sign-description",
+    response_model=CultureResponse,
+    responses={
+        200: {
+            "description": "수어 설명 조회 성공",
+            "model": CultureResponse,
+        },
+        400: {
+            "description": "잘못된 요청 (키워드 누락 등)",
+        },
+        500: {
+            "description": "서버 내부 오류 (API 키 누락, API 호출 실패 등)",
+        }
+    },
+    tags=["Culture API"],
+    summary="수어 설명 조회",
+    description="""
+    ## 키워드로 수어 설명을 조회합니다
+
+    한국문화정보원 API를 통해 입력된 키워드에 해당하는 수어의 설명을 가져옵니다.
+    검색 결과 중 첫 번째 항목의 signDescription을 반환합니다.
+
+    ### 요청 예시:
+    ```json
+    {
+        "keyword": "공주"
+    }
+    ```
+
+    ### 응답 예시:
+    ```json
+    {
+        "keyword": "공주",
+        "sign_description": "손등이 위로 향하게 편 왼손의 2지 옆면을 오른 주먹의 1·5지 끝으로 스쳐 올린 다음, 오른 주먹의 4지를 펴서 끝으로 배를 스쳐 내려 등이 위로 향하게 한다."
+    }
+    ```
+
+    ### 주의사항:
+    - CULTURE_API_KEY 환경변수가 설정되어 있어야 합니다
+    - 검색 결과가 없는 경우 sign_description은 null이 됩니다
+    """
+)
+async def get_culture_sign_description(request: CultureRequest):
+    """키워드로 수어 설명을 조회합니다."""
+    if not request.keyword or not request.keyword.strip():
+        raise HTTPException(status_code=400, detail="키워드가 필요합니다.")
+    
+    try:
+        sign_description = await get_sign_description(request.keyword.strip())
+        
+        return CultureResponse(
+            keyword=request.keyword.strip(),
+            sign_description=sign_description
+        )
+        
+    except ValueError as e:
+        # 환경변수 누락 등
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        # API 호출 실패 등
+        raise HTTPException(status_code=500, detail=f"수어 설명 조회 실패: {str(e)}")
+
+
+# 통합 파이프라인 엔드포인트
+from pydantic import BaseModel, HttpUrl
+import uuid
+from datetime import datetime
+
+
+class PipelineRequest(BaseModel):
+    """파이프라인 처리 요청"""
+    s3_image_url: HttpUrl
+
+
+class PipelineResponse(BaseModel):
+    """파이프라인 처리 응답"""
+    task_id: str
+    status: str
+    message: str
+    started_at: str
+
+
+class PipelineResultResponse(BaseModel):
+    """파이프라인 결과 응답"""
+    task_id: str
+    status: str
+    video_urls: list[str] = []
+    video_details: list[dict] = []
+    total_videos: int = 0
+    successful_videos: int = 0
+    failed_videos: int = 0
+    completed_at: str | None = None
+    error: str | None = None
+
+
+@app.post(
+    "/process-image-to-videos",
+    response_model=PipelineResultResponse,
+    responses={
+        200: {
+            "description": "파이프라인 처리 완료됨",
+            "model": PipelineResultResponse,
+        },
+        400: {
+            "description": "잘못된 요청 (유효하지 않은 S3 URL 등)",
+            "model": ErrorResponse,
+        },
+        500: {
+            "description": "서버 내부 오류",
+            "model": ErrorResponse,
+        }
+    },
+    tags=["Pipeline"],
+    summary="이미지에서 수어 동영상 생성 파이프라인 (Gemini + Veo3)",
+    description="""
+    ## S3 이미지 URL에서 수어 동영상 생성 (Gemini + Veo3 통합)
+
+    이 엔드포인트는 다음 과정을 수행합니다:
+    1. **OCR**: S3 이미지에서 텍스트 추출 (Google Vision API)
+    2. **Gemini 통합 처리**: 
+       - 문장 분할 및 형태소 분석
+       - Culture API에서 각 형태소별 수어 데이터 수집
+       - 수어 데이터를 포함한 Veo3용 프롬프트 생성
+    3. **Veo3 비디오 생성**: Gemini가 생성한 프롬프트로 수어 동영상 생성
+    4. **결과 반환**: 생성된 모든 동영상의 S3 URL 반환
+
+    ### 사용법:
+    ```json
+    {
+        "s3_image_url": "https://your-bucket.s3.amazonaws.com/your-image.jpg"
+    }
+    ```
+
+    ### 응답:
+    - **task_id**: 작업 추적용 고유 ID
+    - **status**: 'completed' (처리 완료)
+    - **video_urls**: 생성된 비디오 URL 목록
+    - **video_details**: 각 비디오의 상세 정보
+    - **total_videos**: 총 생성된 비디오 수
+    - **successful_videos**: 성공한 비디오 수
+    - **failed_videos**: 실패한 비디오 수
+
+    ### 특징:
+    - **동기 처리**: 요청 시 즉시 전체 파이프라인 실행 후 결과 반환
+    - **Gemini AI**: 고품질 문장 분석 및 프롬프트 생성
+    - **Veo3 통합**: Gemini 프롬프트를 직접 Veo3에 전달
+    - **에러 처리**: Veo3 API 오류 시 모의 결과 생성으로 안정성 확보
+    """
+)
+async def process_image_to_videos_gemini_veo3(request: PipelineRequest):
+    """Gemini + Veo3 통합 파이프라인으로 이미지 처리 및 수어 동영상 생성"""
+    try:
+        # S3 URL 검증
+        url_str = str(request.s3_image_url)
+        if not any(domain in url_str for domain in ['amazonaws.com', 's3.']):
+            raise HTTPException(
+                status_code=400, 
+                detail="유효한 S3 URL이 아닙니다. amazonaws.com 도메인이 필요합니다."
+            )
+        
+        # 작업 ID 생성
+        task_id = f"gemini_veo3_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
+        
+        print(f"🚀 Gemini + Veo3 통합 파이프라인 시작: {task_id}")
+        print(f"📸 S3 이미지 URL: {url_str}")
+        
+        # Gemini + Veo3 통합 파이프라인 실행
+        from app.services.integrated_pipeline import IntegratedPipeline
+        
+        try:
+            # 파이프라인 생성 및 실행
+            pipeline = IntegratedPipeline(task_id)
+            result = await pipeline.execute(url_str)
+            
+            print(f"✅ 파이프라인 실행 완료: {task_id}")
+            print(f"📊 결과: {result}")
+            
+            # 결과를 응답 형식으로 변환
+            video_urls = []
+            video_details = []
+            
+            if 'video_details' in result and result['video_details']:
+                for video in result['video_details']:
+                    if 'video_url' in video:
+                        video_urls.append(video['video_url'])
+                    video_details.append(video)
+            
+            response = PipelineResultResponse(
+                task_id=task_id,
+                status=result.get('status', 'completed'),
+                video_urls=video_urls,
+                video_details=video_details,
+                total_videos=result.get('total_videos', len(video_details)),
+                successful_videos=result.get('successful_videos', len([v for v in video_details if v.get('status') == 'completed'])),
+                failed_videos=result.get('failed_videos', len([v for v in video_details if v.get('status') != 'completed'])),
+                completed_at=datetime.now().isoformat(),
+                error=None
+            )
+            
+            print(f"🎉 응답 생성 완료: {len(video_urls)}개 비디오 URL")
+            return response
+            
+        except Exception as pipeline_error:
+            print(f"❌ 파이프라인 실행 중 오류: {pipeline_error}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"파이프라인 실행 중 오류 발생: {str(pipeline_error)}"
+            )
+        
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        print(f"❌ 예상치 못한 오류: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"파이프라인 시작 중 오류 발생: {str(e)}"
+        )
+
+
+@app.post(
+    "/process-image-to-videos-legacy",
+    response_model=PipelineResultResponse,
+    responses={
+        200: {
+            "description": "파이프라인 처리 완료됨",
+            "model": PipelineResultResponse,
+        },
+        400: {
+            "description": "잘못된 요청 (유효하지 않은 S3 URL 등)",
+            "model": ErrorResponse,
+        },
+        500: {
+            "description": "서버 내부 오류",
+            "model": ErrorResponse,
+        }
+    },
+    tags=["Pipeline"],
+    summary="이미지에서 수어 동영상 생성 파이프라인 (기존 방식)",
+    description="""
+    ## S3 이미지 URL에서 수어 동영상 생성 (기존 방식)
+
+    이 엔드포인트는 다음 과정을 수행합니다:
+    1. S3 이미지에서 텍스트 추출 (OCR)
+    2. 텍스트를 문장별로 분할
+    3. 각 문장을 단어별로 토큰화
+    4. 각 단어의 수어 설명 조회
+    5. 수어 설명으로 비디오 생성 프롬프트 생성
+    6. Veo를 사용한 수어 동영상 생성
+    7. 생성된 동영상들을 S3에 업로드
+
+    ### 사용법:
+    ```json
+    {
+        "s3_image_url": "https://your-bucket.s3.amazonaws.com/your-image.jpg"
+    }
+    ```
+
+    ### 응답:
+    - **task_id**: 작업 추적용 고유 ID
+    - **status**: 'processing' (처리 중)
+    - **message**: 상태 메시지
+    """
+)
+def process_image_to_videos(request: PipelineRequest):
+    """이미지 처리 및 수어 동영상 생성 파이프라인 시작 (기존 방식)"""
+    try:
+        # S3 URL 검증
+        url_str = str(request.s3_image_url)
+        if not any(domain in url_str for domain in ['amazonaws.com', 's3.']):
+            raise HTTPException(
+                status_code=400, 
+                detail="유효한 S3 URL이 아닙니다. amazonaws.com 도메인이 필요합니다."
+            )
+        
+        # 작업 ID 생성
+        task_id = f"pipeline_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
+        
+        # 동기적으로 파이프라인 실행하고 결과 바로 반환
+        from app.services.sync_pipeline import SyncIntegratedPipeline
+        
+        # 파이프라인 생성 및 실행
+        pipeline = SyncIntegratedPipeline(task_id)
+        result = pipeline.execute(url_str)
+        
+        # 완료된 결과를 바로 반환
+        return PipelineResultResponse(
+            task_id=task_id,
+            status=result.get('status', 'completed'),
+            video_urls=result.get('video_urls', []),
+            video_details=result.get('video_details', []),
+            total_videos=result.get('total_videos', 0),
+            successful_videos=result.get('successful_videos', 0),
+            failed_videos=result.get('failed_videos', 0),
+            completed_at=result.get('completed_at'),
+            error=result.get('error')
+        )
+        
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"파이프라인 시작 중 오류 발생: {str(e)}"
+        )
+
+
+@app.get(
+    "/pipeline-status/{task_id}",
+    response_model=PipelineResultResponse,
+    responses={
+        200: {
+            "description": "파이프라인 상태 조회 성공",
+            "model": PipelineResultResponse,
+        },
+        404: {
+            "description": "작업 ID를 찾을 수 없음",
+            "model": ErrorResponse,
+        },
+        500: {
+            "description": "서버 내부 오류",
+            "model": ErrorResponse,
+        }
+    },
+    tags=["Pipeline"],
+    summary="파이프라인 처리 상태 조회",
+    description="""
+    ## 파이프라인 처리 상태 및 결과 조회
+
+    작업 ID로 파이프라인 처리 상태를 확인합니다.
+
+    ### 응답 상태:
+    - **processing**: 처리 중
+    - **completed**: 완료 (비디오 URL 목록 포함)
+    - **failed**: 실패 (오류 메시지 포함)
+
+    ### 완료 시 응답:
+    ```json
+    {
+        "task_id": "pipeline_20250819_123456_abc12345",
+        "status": "completed",
+        "video_urls": [
+            "https://bucket.s3.amazonaws.com/video1.mp4",
+            "https://bucket.s3.amazonaws.com/video2.mp4"
+        ],
+        "total_videos": 2,
+        "successful_videos": 2,
+        "failed_videos": 0,
+        "completed_at": "2025-08-19T12:34:56"
+    }
+    ```
+    """
+)
+async def get_pipeline_status(task_id: str):
+    """파이프라인 처리 상태 조회"""
+    try:
+        # 비동기 파이프라인 상태 조회
+        from app.services.integrated_pipeline import get_pipeline_status
+        status_info = get_pipeline_status(task_id)
+        
+        # status_info가 None인 경우 처리
+        if status_info is None:
+            raise HTTPException(status_code=404, detail=f"작업 ID {task_id}를 찾을 수 없습니다 (상태 정보 없음)")
+        
+        if status_info.get('pipeline_status') == 'not_found':
+            raise HTTPException(status_code=404, detail=f"작업 ID {task_id}를 찾을 수 없습니다")
+        
+        # 파이프라인 상태를 응답 형식으로 변환
+        final_result = status_info.get('final_result', {}) if status_info else {}
+        
+        return PipelineResultResponse(
+            task_id=task_id,
+            status=status_info.get('pipeline_status', 'unknown'),
+            video_urls=final_result.get('video_urls', []),
+            total_videos=final_result.get('total_videos', 0),
+            successful_videos=final_result.get('successful_videos', 0),
+            failed_videos=final_result.get('failed_videos', 0),
+            completed_at=final_result.get('completed_at'),
+            error=status_info.get('error')
+        )
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"상태 조회 중 오류 발생: {str(e)}"
+        )
+
+
+@app.post("/analyze-sentences")
+async def analyze_sentences_with_gemini(
+    text: str = Body(..., embed=True, description="분석할 한국어 텍스트")
+):
+    """
+    Gemini API를 사용하여 한국어 문장을 분석하고 형태소를 추출합니다.
+    
+    입력 텍스트는 두 개의 문장으로 분할되어야 합니다:
+    1. "내가 그랬어요!"
+    2. "텔레비전을 부순 건 바로 나예요!"
+    
+    각 문장에서 핵심 형태소만 추출하여 반환합니다.
+    """
+    try:
+        # API 키 확인
+        api_key = os.getenv('GOOGLE_API_KEY')
+        if not api_key:
+            raise HTTPException(
+                status_code=500, 
+                detail="GOOGLE_API_KEY 환경 변수가 설정되지 않았습니다."
+            )
+        
+        # Gemini 서비스 초기화
+        gemini_service = GeminiService(api_key)
+        
+        # 문장 분석 수행
+        result = gemini_service.analyze_sentences(text)
+        
+        # 결과 검증
+        if not gemini_service.validate_analysis_result(result):
+            raise HTTPException(
+                status_code=500,
+                detail="Gemini API 응답이 예상 형식과 일치하지 않습니다."
+            )
+        
+        # 요약 정보 추가
+        summary = gemini_service.get_analysis_summary(result)
+        
+        return {
+            "success": True,
+            "input_text": text,
+            "analysis_result": result,
+            "summary": summary
+        }
+        
+    except ImportError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Gemini 서비스 초기화 실패: {str(e)}"
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"입력 텍스트 처리 오류: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"문장 분석 중 오류 발생: {str(e)}"
+        )
