@@ -14,6 +14,7 @@ from .tokenizer import tokenize
 from .culture_api import get_sign_description
 from .prompt_template import get_default_prompt_manager
 from .veo_service import generate_sign_video
+import random
 
 logger = logging.getLogger(__name__)
 
@@ -270,7 +271,18 @@ class SyncIntegratedPipeline:
             # 모의 VEO 결과 생성 (실제 비동기 API 대신)
             try:
                 # 실제로는 VEO API 호출이 비동기이므로 모의 결과 생성
-                mock_video_url = "https://ddo123.s3.ap-northeast-2.amazonaws.com/veo-videos/veo_video_unknown_1755918254.mp4"
+                mock_video_url =random.choice([
+            "https://ddo123.s3.ap-northeast-2.amazonaws.com/veo-videos/veo3.mp4", 
+            "https://ddo123.s3.ap-northeast-2.amazonaws.com/veo-videos/veo_video_unknown_1755932952.mp4",
+            "https://ddo123.s3.ap-northeast-2.amazonaws.com/veo-videos/veo_video_unknown_1755918254.mp4",
+            "https://ddo123.s3.ap-northeast-2.amazonaws.com/veo-videos/veo_video_unknown_1755917379.mp4",
+            "https://ddo123.s3.ap-northeast-2.amazonaws.com/veo-videos/veo_video_unknown_1755924635.mp4",
+            "https://ddo123.s3.ap-northeast-2.amazonaws.com/veo-videos/veo_video_unknown_1755923602.mp4",
+            "https://ddo123.s3.ap-northeast-2.amazonaws.com/veo-videos/veo_video_unknown_1755917716.mp4",
+            "https://ddo123.s3.ap-northeast-2.amazonaws.com/veo-videos/veo_video_unknown_1755917089.mp4",
+            "https://ddo123.s3.ap-northeast-2.amazonaws.com/veo-videos/veo_video_unknown_1755915988.mp4",
+            "https://ddo123.s3.ap-northeast-2.amazonaws.com/veo-videos/veo_video_unknown_1755911869.mp4"
+            ])
                 
                 video_result = {
                     'text': text,
