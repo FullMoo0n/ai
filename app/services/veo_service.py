@@ -91,6 +91,13 @@ class VeoService:
     async def upload_video_to_s3(self, video_uri: str, task_id: str) -> str:
         """
         Google API 비디오 URI를 S3에 업로드합니다.
+        
+        Args:
+            video_uri: Google API에서 반환된 비디오 URI
+            task_id: 작업 ID
+            
+        Returns:
+            str: S3 업로드된 URL 또는 원본 URI (실패 시)
         """
         if not self.s3_client or not self.s3_bucket:
             logger.warning("S3 클라이언트가 초기화되지 않았습니다.")
@@ -148,7 +155,7 @@ class VeoService:
         prompt: str, 
         aspect_ratio: str = "16:9",
         task_id: Optional[str] = None,
-        image_gcs_uri: Optional[str] = None,
+        image_gcs_uri: Optional[str] = None,  # 사용되지 않음 (로컬 이미지 사용)
         output_gcs_uri: Optional[str] = None
     ) -> Dict[str, Any]:
         """
@@ -158,7 +165,7 @@ class VeoService:
             prompt: Gemini가 생성한 수어 비디오 프롬프트
             aspect_ratio: 화면 비율 (기본: 16:9)
             task_id: 작업 ID (로깅용)
-            image_gcs_uri: 참조 이미지 GCS URI (선택사항)
+            image_gcs_uri: 사용되지 않음 (로컬 이미지 images/binary2.png 사용)
             output_gcs_uri: 출력 비디오 GCS URI (선택사항)
             
         Returns:
@@ -175,6 +182,8 @@ class VeoService:
             logger.info(f"📝 프롬프트 길이: {len(prompt)}자")
             logger.info(f"📐 화면 비율: {aspect_ratio}")
             
+            # 로컬 이미지 파일 사용 (CHARACTER_IMG 환경변수는 더 이상 사용하지 않음)
+            
             # Veo3 API 호출 시도
             try:
                 video_result = await self._call_veo3_api(
@@ -188,8 +197,8 @@ class VeoService:
                     if original_url and original_url.startswith('https://generativelanguage.googleapis.com'):
                         logger.info(f"📤 Google API URI를 S3에 업로드 중: {task_id or 'unknown'}")
                         s3_url = await self.upload_video_to_s3(original_url, task_id or 'unknown')
-                        video_result['video_url'] = s3_url
-                        video_result['original_google_uri'] = original_url
+                        video_result['video_url'] = s3_url  # S3 URL로 교체
+                        video_result['original_google_uri'] = original_url  # 원본 URI 보존
                         logger.info(f"✅ S3 업로드 완료, URL 업데이트: {s3_url}")
                     
                     return video_result
@@ -232,14 +241,27 @@ class VeoService:
             # 기본 설정값들
             model_name = os.getenv('VEO_MODEL', 'veo-3.0-generate-preview')
             
-            # 이미지 설정 (선택사항)
+            # 이미지 설정 (로컬 파일을 Image 객체로 로드)
             image_config = None
-            if image_gcs_uri:
-                image_config = Image(
-                    gcs_uri=image_gcs_uri,
-                    mime_type="image/png"  # 기본값, 필요시 수정
-                )
-                logger.info(f"🖼️ 참조 이미지 사용: {image_gcs_uri}")
+            image_path = "images/binary2.png"  # 고정된 로컬 이미지 경로
+            
+            if os.path.exists(image_path):
+                try:
+                    # Image 객체를 파일 경로로 생성
+                    with open(image_path, 'rb') as f:
+                        image_bytes = f.read()
+                    
+                    # Image 객체로 바이트 데이터 래핑
+                    image_config = Image(
+                        image_bytes=image_bytes,
+                        mime_type="image/png"
+                    )
+                    logger.info(f"🖼️ 로컬 이미지를 Image 객체로 로드: {image_path}")
+                except Exception as e:
+                    logger.error(f"❌ 이미지 파일 로드 실패: {str(e)}")
+                    image_config = None
+            else:
+                logger.warning(f"⚠️ 이미지 파일을 찾을 수 없음: {image_path}")
             
             # 출력 설정 (선택사항)
             if not output_gcs_uri:
@@ -251,9 +273,12 @@ class VeoService:
             operation = self.client.models.generate_videos(
                 model=model_name,
                 prompt=prompt,  # 텍스트 프롬프트
-                image=image_config,  # 선택사항
+                image=image_config,  # Image 객체로 전달
                 config=GenerateVideosConfig(
                     aspect_ratio=aspect_ratio,
+                    number_of_videos=1,
+                    duration_seconds=8,
+                    enhance_prompt=True,
                 ),
             )
             
@@ -312,24 +337,38 @@ class VeoService:
                     continue
             
             # 작업 완료 확인
+            logger.info(f"🔍 작업 완료 상태 확인: operation.response={bool(operation.response)}")
+            
             if operation.response and hasattr(operation.result, 'generated_videos'):
-                video_uri = operation.result.generated_videos[0].video.uri
-                logger.info(f"🎬 Veo3 비디오 생성 완료: {video_uri}")
+                generated_videos = operation.result.generated_videos
+                logger.info(f"🔍 generated_videos 타입: {type(generated_videos)}, 길이: {len(generated_videos) if generated_videos else 'None'}")
                 
-                return {
-                    'status': 'success',
-                    'video_url': video_uri,
-                    'video_data': {
-                        'uri': video_uri,
-                        'operation_name': operation.name
-                    },
-                    'prompt': getattr(operation, 'prompt', ''),
-                    'task_id': task_id,
-                    'created_at': datetime.now().isoformat(),
-                    'note': 'Veo3 API 성공 - 새로운 API 형식'
-                }
+                # 비디오 리스트가 비어있지 않은지 확인
+                if generated_videos and len(generated_videos) > 0:
+                    video_uri = generated_videos[0].video.uri
+                    logger.info(f"🎬 Veo3 비디오 생성 완료: {video_uri}")
+                    
+                    return {
+                        'status': 'success',
+                        'video_url': video_uri,
+                        'video_data': {
+                            'uri': video_uri,
+                            'operation_name': operation.name
+                        },
+                        'prompt': getattr(operation, 'prompt', ''),
+                        'task_id': task_id,
+                        'created_at': datetime.now().isoformat(),
+                        'note': 'Veo3 API 성공 - 새로운 API 형식'
+                    }
+                else:
+                    logger.error(f"❌ generated_videos 리스트가 비어있음: {generated_videos}")
+                    return None
             else:
-                logger.warning(f"⚠️ Veo3 작업 응답에 비디오 데이터가 없음: {operation}")
+                logger.error(f"❌ 작업 응답이 없거나 generated_videos 속성이 없음")
+                logger.error(f"   - operation.response: {operation.response}")
+                logger.error(f"   - hasattr(operation.result, 'generated_videos'): {hasattr(operation.result, 'generated_videos') if hasattr(operation, 'result') else 'operation.result 없음'}")
+                if hasattr(operation, 'result'):
+                    logger.error(f"   - operation.result: {operation.result}")
                 return None
                 
         except Exception as e:
@@ -367,7 +406,7 @@ class VeoService:
         self, 
         prompts: Dict[str, str], 
         aspect_ratio: str = "16:9",
-        image_gcs_uri: Optional[str] = None,
+        image_gcs_uri: Optional[str] = None,  # 사용되지 않음 (로컬 이미지 사용)
         output_gcs_uri: Optional[str] = None
     ) -> Dict[str, Dict[str, Any]]:
         """
@@ -376,7 +415,7 @@ class VeoService:
         Args:
             prompts: 문장별 프롬프트 딕셔너리
             aspect_ratio: 화면 비율
-            image_gcs_uri: 참조 이미지 GCS URI (선택사항)
+            image_gcs_uri: 사용되지 않음 (로컬 이미지 images/binary2.png 사용)
             output_gcs_uri: 출력 비디오 GCS URI (선택사항)
             
         Returns:
@@ -458,7 +497,7 @@ async def generate_sign_video(
     Args:
         prompt: Gemini가 생성한 프롬프트
         aspect_ratio: 화면 비율
-        image_gcs_uri: 참조 이미지 GCS URI (선택사항)
+        image_gcs_uri: 사용되지 않음 (로컬 이미지 images/binary2.png 사용)
         output_gcs_uri: 출력 비디오 GCS URI (선택사항)
         
     Returns:
@@ -480,7 +519,7 @@ async def generate_multiple_sign_videos(
     Args:
         prompts: 문장별 프롬프트
         aspect_ratio: 화면 비율
-        image_gcs_uri: 참조 이미지 GCS URI (선택사항)
+        image_gcs_uri: 사용되지 않음 (로컬 이미지 images/binary2.png 사용)
         output_gcs_uri: 출력 비디오 GCS URI (선택사항)
         
     Returns:

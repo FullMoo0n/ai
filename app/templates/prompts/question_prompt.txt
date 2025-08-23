@@ -33,4 +33,4 @@ Question-Specific Guidelines:
 Additional Context:
 This is a {{ sentence|length }} character question that asks: {{ sentence }}
 
-Please create a realistic video of Korean Sign Language interpretation for this question, emphasizing the interrogative nature. 
+Please create a  video of Korean Sign Language interpretation for this question, emphasizing the interrogative nature. 

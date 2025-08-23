@@ -39,4 +39,4 @@ Tone Considerations:
 Additional Context:
 This is a {{ sentence|length }} character command that instructs: {{ sentence }}
 
-Please create a realistic video of Korean Sign Language interpretation for this command, emphasizing the instructional and authoritative nature. 
+Please create a  video of Korean Sign Language interpretation for this command, emphasizing the instructional and authoritative nature. 
