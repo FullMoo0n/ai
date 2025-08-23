@@ -30,4 +30,4 @@ General Instructions:
 Context:
 This is a {{ sentence|length }} character text that conveys: {{ sentence }}
 
-Please create a realistic video of Korean Sign Language interpretation for this content with natural and fluent signing. 
+Please create a  video of Korean Sign Language interpretation for this content with natural and fluent signing. 

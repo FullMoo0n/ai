@@ -10,10 +10,11 @@ Create a comprehensive video generation prompt for Korean Sign Language (KSL) vi
 **[Procedure and Rules]**
 
 1. **Prompt Structure**: Create a detailed video generation prompt that includes:
-   - Clear video requirements (duration, aspect ratio, background, lighting)
+   - Clear video requirements (duration, aspect ratio, lighting)
    - Specific sign language instructions
    - Facial expression and body language guidance
    - Technical specifications for video quality
+   - figure image reference for consistent appearance
 
 2. **Sign Language Integration**: 
    - Include ONLY the sign language data that was successfully retrieved from the Culture API
@@ -24,9 +25,8 @@ Create a comprehensive video generation prompt for Korean Sign Language (KSL) vi
 3. **Video Requirements**:
    - Duration: 5-8 seconds
    - Aspect ratio: 16:9
-   - Background: Clean, neutral (white or light color)
    - Lighting: Bright and clear for hand visibility
-   - Camera angle: Waist-up shot of the signer
+   - figure appearance: Based on provided reference image
 
 4. **Sign Language Guidelines**:
    - Natural and fluent signing movements
@@ -36,37 +36,38 @@ Create a comprehensive video generation prompt for Korean Sign Language (KSL) vi
    - Smooth transitions between signs
 
 **[Output Format]**
-Generate a comprehensive, detailed prompt that can be directly used by Veo3 video generation API. The prompt should be in English and include all necessary details for creating a high-quality Korean Sign Language video.
+Generate a comprehensive, detailed prompt that can be directly used by Veo3 video generation API. The prompt should be in English and include all necessary details for creating a high-quality Korean Sign Language video with figure consistency.
 
 **[Example Structure]**
 ```
-Create a sign language video showing a person performing Korean Sign Language (KSL) for the following sentence:
-
-"[SENTENCE]"
+Create a sign language video showing the figure from the provided reference image performing Korean Sign Language (KSL)
 
 Video Requirements:
-- Show a person from waist up performing sign language
-- Clear, natural hand movements and facial expressions
-- Appropriate facial expressions that match the content
+- Show the figure from the reference image
+- **Consistency in the figure's appearance and sign language must be maintained for the full duration of the video.**
+- The figure's hands and fingers should follow the sign language movements precisely
+- Clear, natural hand movements and facial expressions matching the figure's appearance
+- Appropriate facial expressions that match the content and tone of the sentence
 - Duration: 5-8 seconds
-- Please don't put subtitles.
 - Good lighting with clear visibility of hands and face
 
 Sign Language Details:
 [Include only actual sign data from Culture API]
 
 Key Instructions:
-1. The signer should appear natural and fluent
+1. The figure should appear natural and fluent in their signing
 2. Hand movements should be clear and precise
 3. Facial expressions should convey the meaning appropriately
 4. Maintain consistent signing speed throughout
 5. Ensure smooth transitions between signs
-6. The person should maintain appropriate eye contact
+6. The figure should maintain appropriate eye contact with the camera
+7. Focus solely on the figure's sign language performance
+8. **From start to finish, the figure must continuously and consistently perform the same sign language throughout the entire video.**
+9. CRITICAL: **Only the background, figure, and hand movements should be present. No other elements.**
+10. CRITICAL: **The video should feature only the specified figure.**
 
 Additional Context:
-This is a [X] character sentence that conveys: [SENTENCE]
-
-Please create a realistic video of Korean Sign Language interpretation for this content.
+Please create a video of the figure performing Korean Sign Language interpretation for this content
 ```
 
 **[Important Notes]**
@@ -74,3 +75,5 @@ Please create a realistic video of Korean Sign Language interpretation for this 
 - Do NOT invent or guess sign descriptions
 - Focus on creating a prompt that will result in a high-quality, authentic KSL video
 - Ensure the prompt is specific enough for Veo3 to generate appropriate content
+- The figure should maintain consistency with the reference image provided
+- 

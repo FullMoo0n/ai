@@ -304,6 +304,7 @@ class GeminiService:
                 video_prompts[sentence] = prompt
                 
                 logger.info(f"✅ 프롬프트 생성 완료: {len(prompt)}자")
+                logger.info(f"🔍 프롬프트 내용: {prompt}")
             
             logger.info(f"🎉 총 {len(video_prompts)}개 Veo3용 프롬프트 생성 완료")
             return video_prompts
@@ -315,6 +316,7 @@ class GeminiService:
     def _create_veo3_prompt(self, sentence: str, morphemes: List[str], sign_data: List[Dict[str, Any]]) -> str:
         """
         Veo3용 수어 비디오 프롬프트를 생성합니다.
+        gemini_video_prompt.txt 템플릿을 사용하여 Gemini AI가 프롬프트를 생성합니다.
         
         Args:
             sentence: 문장
@@ -325,48 +327,112 @@ class GeminiService:
             str: Veo3용 프롬프트
         """
         try:
-            # 기본 프롬프트 구조
-            prompt = f"""Create a sign language video showing a person performing Korean Sign Language (KSL) for the following sentence:
+            # gemini_video_prompt.txt 템플릿 로드
+            video_prompt_template = self._load_video_prompt_template()
+
+            # 문장 분석 데이터 준비
+            sentence_analysis = f"문장: '{sentence}' (길이: {len(sentence)}자), 형태소: {morphemes}"
+            
+            # 수어 데이터 포맷팅
+            if sign_data:
+                sign_data_formatted = []
+                for item in sign_data:
+                    if 'word' in item and 'description' in item:
+                        sign_data_formatted.append(f"- Word: \"{item['word']}\" - {item['description']}")
+                sign_data_str = "\n".join(sign_data_formatted)
+            else:
+                sign_data_str = "No specific sign language details provided from Culture API."
+            
+            # 템플릿 변수 치환
+            template_with_data = video_prompt_template.replace("{{sentence_analysis}}", sentence_analysis)
+            template_with_data = template_with_data.replace("{{sign_data}}", sign_data_str)
+            
+            # Gemini AI에게 프롬프트 생성 요청
+            logger.info(f"🤖 Gemini AI에게 비디오 프롬프트 생성 요청: '{sentence[:30]}...'")
+            
+            response = self.model.generate_content(template_with_data)
+            
+            if response and response.text:
+                generated_prompt = response.text.strip()
+                logger.info(f"✅ Gemini AI 프롬프트 생성 완료: {len(generated_prompt)}자")
+                return generated_prompt
+            else:
+                logger.warning("⚠️ Gemini AI 응답이 비어있음, 폴백 프롬프트 사용")
+                return self._create_fallback_prompt(sentence, sign_data)
+                
+        except Exception as e:
+            logger.error(f"❌ Gemini AI 프롬프트 생성 중 오류: {e}")
+            # 오류 발생 시 폴백 프롬프트 반환
+            return self._create_fallback_prompt(sentence, sign_data)
+    
+    def _load_video_prompt_template(self) -> str:
+        """
+        gemini_video_prompt.txt 템플릿을 로드합니다.
+        
+        Returns:
+            str: 비디오 프롬프트 템플릿 내용
+        """
+        try:
+            prompt_path = Path(__file__).parent.parent / "templates" / "prompts" / "gemini_video_prompt.txt"
+            with open(prompt_path, 'r', encoding='utf-8') as f:
+                return f.read()
+        except FileNotFoundError:
+            logger.error("❌ gemini_video_prompt.txt 템플릿 파일을 찾을 수 없습니다.")
+            raise
+        except Exception as e:
+            logger.error(f"❌ 비디오 프롬프트 템플릿 로드 실패: {e}")
+            raise
+    
+    def _create_fallback_prompt(self, sentence: str, sign_data: List[Dict[str, Any]]) -> str:
+        """
+        폴백용 기본 프롬프트를 생성합니다.
+        
+        Args:
+            sentence: 문장
+            sign_data: 수어 데이터
+            
+        Returns:
+            str: 폴백 프롬프트
+        """
+        prompt = f"""Create a sign language video showing the character from the provided reference image performing Korean Sign Language (KSL) for the following sentence:
 
 "{sentence}"
 
 Video Requirements:
-- Show a person from waist up performing sign language
-- Clear, natural hand movements and facial expressions
-- Appropriate facial expressions that match the content
+- Show the character from the reference image from waist up performing sign language
+- The character's hands and fingers should follow the sign language movements precisely
+- Clear, natural hand movements and facial expressions matching the character's appearance
+- Appropriate facial expressions that match the content and tone of the sentence
 - Duration: 5-8 seconds
-- Clean background (white or neutral color)
 - Good lighting with clear visibility of hands and face
-- Aspect ratio: 16:9
+- IMPORTANT: Do not include any subtitles, text overlays, or written words in the video
+- CRITICAL: No text, captions, or subtitles should appear anywhere in the video
 
 Sign Language Details:"""
 
-            # 수어 데이터가 있는 경우 상세 정보 포함
-            if sign_data:
-                for item in sign_data:
-                    if 'word' in item and 'description' in item:
-                        prompt += f"\n- Word: \"{item['word']}\" - {item['description']}"
-            else:
-                prompt += "\nNo specific sign language details provided. Please interpret the sentence naturally."
+        # 수어 데이터 추가
+        if sign_data:
+            for item in sign_data:
+                if 'word' in item and 'description' in item:
+                    prompt += f"\n- Word: \"{item['word']}\" - {item['description']}"
+        else:
+            prompt += "\nNo specific sign language details provided."
 
-            prompt += f"""
+        prompt += f"""
 
 Key Instructions:
-1. The signer should appear natural and fluent
+1. The character should appear natural and fluent in their signing
 2. Hand movements should be clear and precise
 3. Facial expressions should convey the meaning appropriately
 4. Maintain consistent signing speed throughout
 5. Ensure smooth transitions between signs
-6. The person should maintain appropriate eye contact
+6. The character should maintain appropriate eye contact with the camera
+7. ABSOLUTELY NO TEXT OR SUBTITLES should be visible in the video
+8. Focus solely on the character's sign language performance
 
 Additional Context:
 This is a {len(sentence)} character sentence that conveys: {sentence}
 
-Please create a realistic video of Korean Sign Language interpretation for this content."""
+Please create a  video of the character performing Korean Sign Language interpretation for this content, ensuring no text or subtitles appear in the final video."""
 
-            return prompt
-            
-        except Exception as e:
-            logger.error(f"❌ Veo3 프롬프트 생성 중 오류: {e}")
-            # 오류 발생 시 기본 프롬프트 반환
-            return f"Create a Korean Sign Language video for: {sentence}"
+        return prompt

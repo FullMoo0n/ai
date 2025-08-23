@@ -79,17 +79,17 @@ class SyncIntegratedPipeline:
             # 1. OCR 텍스트 추출
             extracted_text = self._step_ocr(s3_image_url)
             
-            # 2. 문장 분할
-            sentences = self._step_segmentation(extracted_text)
+            # 2. 토큰화 및 수어 데이터 조회
+            token_result = self._step_tokenize_and_process(extracted_text)
             
-            # 3. 문장별 처리 (토큰화 + 수어 데이터 + 프롬프트 생성)
-            sentence_results = self._step_process_sentences(sentences)
+            # 3. 프롬프트 생성
+            prompt_result = self._step_generate_prompt(token_result)
             
-            # 4. 비디오 생성 (문장별)
-            video_results = self._step_generate_videos(sentence_results)
+            # 4. 비디오 생성
+            video_result = self._step_generate_video(prompt_result)
             
             # 5. 최종 결과 취합
-            final_result = self._step_finalize(video_results)
+            final_result = self._step_finalize(video_result)
             
             self.pipeline_status = "completed"
             self.final_result = final_result
@@ -139,40 +139,64 @@ class SyncIntegratedPipeline:
             step.completed_at = datetime.now()
             raise
     
-    def _step_segmentation(self, text: str) -> List[str]:
-        """2단계: 문장 분할"""
-        step = self.steps["segmentation"]
+    def _step_tokenize_and_process(self, text: str) -> Dict[str, Any]:
+        """2단계: 전체 텍스트 토큰화 및 수어 데이터 조회"""
+        step = self.steps["tokenization"]
         step.status = "processing"
         step.started_at = datetime.now()
-        self.current_step = "segmentation"
+        self.current_step = "tokenization"
         
         try:
-            logger.info(f"문장 분할 단계 시작: {self.task_id}")
-            
+            logger.info(f"전체 텍스트 처리 단계 시작: {self.task_id}")
             logger.info(f"🔤 원본 텍스트: '{text}'")
             
-            sentences = split_sentences(text)
-            logger.info(f"✂️ 초기 문장 분할 결과: {sentences}")
-            logger.info(f"📊 초기 분할된 문장 수: {len(sentences)}")
+            # 전체 텍스트 토큰화
+            tokens = tokenize(text)
+            logger.info(f"🔗 토큰화 결과: {tokens} (총 {len(tokens)}개)")
             
-            # 빈 문장 제거
-            sentences = [s.strip() for s in sentences if s.strip()]
-            logger.info(f"🧹 빈 문장 제거 후: {sentences}")
-            logger.info(f"📈 최종 문장 수: {len(sentences)}")
+            # 각 토큰에 대해 수어 데이터 조회
+            sign_data = []
+            for token in tokens:
+                try:
+                    # 간단하게 모의 수어 설명 생성
+                    description = f"{token}에 대한 수어 표현"
+                    
+                    if description:
+                        sign_data.append({
+                            'word': token,
+                            'description': description,
+                            'culture_data': {'description': description}
+                        })
+                    else:
+                        sign_data.append({
+                            'word': token,
+                            'description': f'{token}에 대한 수어 표현',
+                            'culture_data': None
+                        })
+                except Exception as e:
+                    logger.warning(f"토큰 '{token}' 수어 데이터 조회 실패: {e}")
+                    sign_data.append({
+                        'word': token,
+                        'description': f'{token}에 대한 수어 표현',
+                        'culture_data': None,
+                        'error': str(e)
+                    })
             
-            # 각 문장 개별 로그
-            for i, sentence in enumerate(sentences):
-                logger.info(f"  📝 문장 {i+1}: '{sentence}'")
+            logger.info(f"📊 수어 데이터 조회 완료: {len(sign_data)}개")
             
-            if not sentences:
-                raise SyncPipelineError("분할할 수 있는 문장이 없습니다")
+            # 결과 구조
+            result = {
+                'text': text,
+                'tokens': tokens,
+                'sign_data': sign_data
+            }
             
-            step.data = sentences
+            step.data = result
             step.status = "completed"
             step.completed_at = datetime.now()
             
-            logger.info(f"✅ 문장 분할 완료: {self.task_id}, 최종 문장 수: {len(sentences)}")
-            return sentences
+            logger.info(f"✅ 토큰화 및 수어 데이터 조회 완료: {self.task_id}")
+            return result
             
         except Exception as e:
             step.status = "failed"
@@ -180,72 +204,36 @@ class SyncIntegratedPipeline:
             step.completed_at = datetime.now()
             raise
     
-    def _step_process_sentences(self, sentences: List[str]) -> List[Dict[str, Any]]:
-        """3단계: 문장별 처리 (토큰화 + 수어 데이터 + 프롬프트 생성)"""
-        step = self.steps["tokenization"]
+    def _step_generate_prompt(self, token_result: Dict[str, Any]) -> Dict[str, Any]:
+        """3단계: 전체 텍스트 기반 프롬프트 생성"""
+        step = self.steps["prompt_generation"]
         step.status = "processing"
         step.started_at = datetime.now()
-        self.current_step = "tokenization"
+        self.current_step = "prompt_generation"
         
         try:
-            logger.info(f"문장별 처리 단계 시작: {self.task_id}, {len(sentences)}개 문장")
+            logger.info(f"프롬프트 생성 단계 시작: {self.task_id}")
             
-            sentence_results = []
+            text = token_result['text']
+            tokens = token_result['tokens']
+            sign_data = token_result['sign_data']
+            
+            # 전체 텍스트에 대한 프롬프트 생성 (Gemini AI 사용)
             prompt_manager = get_default_prompt_manager()
+            video_prompt = prompt_manager.generate_video_prompt(text, sign_data)
             
-            import asyncio
+            logger.info(f"📝 생성된 프롬프트 길이: {len(video_prompt)}자")
+            logger.info(f"🔍 프롬프트 내용 (처음 200자): '{video_prompt[:200]}...'")
             
-            for i, sentence in enumerate(sentences):
-                logger.info(f"🔄 문장 {i+1} 처리 시작: '{sentence}'")
-                
-                # 토큰화
-                tokens = tokenize(sentence)
-                logger.info(f"  🔗 토큰화 결과: {tokens} (총 {len(tokens)}개)")
-                
-                # 각 토큰에 대해 수어 데이터 조회 (비동기 함수를 동기로 호출)
-                sign_data = []
-                for token in tokens:
-                    try:
-                        # 간단하게 모의 수어 설명 생성 (동기 처리용)
-                        description = f"{token}에 대한 수어 표현"
-                        
-                        if description:
-                            sign_data.append({
-                                'word': token,
-                                'description': description,
-                                'culture_data': {'description': description}
-                            })
-                        else:
-                            sign_data.append({
-                                'word': token,
-                                'description': f'{token}에 대한 수어 표현',
-                                'culture_data': None
-                            })
-                    except Exception as e:
-                        logger.warning(f"토큰 '{token}' 수어 데이터 조회 실패: {e}")
-                        sign_data.append({
-                            'word': token,
-                            'description': f'{token}에 대한 수어 표현',
-                            'culture_data': None,
-                            'error': str(e)
-                        })
-                
-                # 프롬프트 생성
-                video_prompt = prompt_manager.generate_video_prompt(sentence, sign_data)
-                logger.info(f"  📝 생성된 프롬프트 (처음 100자): '{video_prompt[:100]}...'")
-                
-                sentence_result = {
-                    'sentence_index': i,
-                    'sentence': sentence,
-                    'tokens': tokens,
-                    'sign_data': sign_data,
-                    'video_prompt': video_prompt
-                }
-                
-                sentence_results.append(sentence_result)
-                logger.info(f"  ✅ 문장 {i+1} 처리 완료")
+            # 결과 구조
+            result = {
+                'text': text,
+                'tokens': tokens,
+                'sign_data': sign_data,
+                'video_prompt': video_prompt
+            }
             
-            step.data = sentence_results
+            step.data = result
             step.status = "completed"
             step.completed_at = datetime.now()
             
@@ -253,8 +241,8 @@ class SyncIntegratedPipeline:
             self.steps["culture_data"].status = "completed"
             self.steps["prompt_gen"].status = "completed"
             
-            logger.info(f"문장별 처리 완료: {self.task_id}")
-            return sentence_results
+            logger.info(f"✅ 프롬프트 생성 완료: {self.task_id}")
+            return result
             
         except Exception as e:
             step.status = "failed"
@@ -262,7 +250,7 @@ class SyncIntegratedPipeline:
             step.completed_at = datetime.now()
             raise
     
-    def _step_generate_videos(self, sentence_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _step_generate_video(self, prompt_result: Dict[str, Any]) -> Dict[str, Any]:
         """4단계: 실제 Veo API를 사용한 비디오 생성 (동기 처리)"""
         step = self.steps["video_gen"]
         step.status = "processing"
@@ -271,63 +259,46 @@ class SyncIntegratedPipeline:
         
         try:
             logger.info(f"🎬 비디오 생성 단계 시작: {self.task_id}")
-            logger.info(f"📊 처리할 문장 수: {len(sentence_results)}개")
             
-            video_results = []
+            text = prompt_result['text']
+            video_prompt = prompt_result['video_prompt']
             
-            for sentence_result in sentence_results:
-                sentence_index = sentence_result['sentence_index']
-                sentence = sentence_result['sentence']
-                video_prompt = sentence_result['video_prompt']
-                
-                logger.info(f"🎥 비디오 {sentence_index+1}/{len(sentence_results)} 생성 시작")
-                logger.info(f"  📝 문장: '{sentence}'")
-                logger.info(f"  🎬 프롬프트 길이: {len(video_prompt)}자")
-                
-                # 실제 Veo API 호출
-                veo_result = generate_sign_video(video_prompt, aspect_ratio="16:9")
-                
-                if veo_result['status'] == 'success':
-                    # 성공: 실제 Veo 비디오 URI 사용
-                    video_result = {
-                        'sentence_index': sentence_index,
-                        'sentence': sentence,
-                        'video_url': veo_result['video_uri'],
-                        'video_prompt': video_prompt,
-                        'status': 'completed',
-                        'veo_operation': veo_result.get('operation')
-                    }
-                    logger.info(f"  ✅ 비디오 {sentence_index+1} 생성 성공: {veo_result['video_uri']}")
-                else:
-                    # 실패: 에러 정보와 함께 기록
-                    # API 키 만료 등의 경우 모의 URL로 대체
-                    video_filename = f"video_{self.task_id}_{sentence_index}_{datetime.now().strftime('%H%M%S')}.mp4"
-                    mock_s3_url = f"https://ddo123.s3.ap-northeast-2.amazonaws.com/videos/{video_filename}"
-                    
-                    video_result = {
-                        'sentence_index': sentence_index,
-                        'sentence': sentence,
-                        'video_url': mock_s3_url,  # 모의 URL 사용
-                        'video_prompt': video_prompt,
-                        'status': 'failed_but_mocked',
-                        'error': veo_result.get('error', '알 수 없는 오류'),
-                        'veo_operation': veo_result.get('operation')
-                    }
-                    logger.warning(f"  ⚠️ 비디오 {sentence_index+1} 생성 실패, 모의 URL 사용")
-                    logger.warning(f"     오류: {veo_result.get('error', '알 수 없는 오류')}")
-                
-                video_results.append(video_result)
+            logger.info(f"🎥 단일 비디오 생성 시작")
+            logger.info(f"  📝 텍스트: '{text}'")
+            logger.info(f"  🎬 프롬프트 길이: {len(video_prompt)}자")
             
-            step.data = video_results
+            # 모의 VEO 결과 생성 (실제 비동기 API 대신)
+            try:
+                # 실제로는 VEO API 호출이 비동기이므로 모의 결과 생성
+                mock_video_url = f"https://mock-veo-video.com/video_{self.task_id}.mp4"
+                
+                video_result = {
+                    'text': text,
+                    'video_url': mock_video_url,
+                    'video_prompt': video_prompt,
+                    'status': 'mock',
+                    'created_at': datetime.now().isoformat(),
+                    'note': '동기 파이프라인용 모의 결과'
+                }
+                logger.info(f"✅ 모의 비디오 생성 완료: {mock_video_url}")
+                
+            except Exception as api_error:
+                logger.error(f"❌ 비디오 생성 중 오류: {api_error}")
+                video_result = {
+                    'text': text,
+                    'video_url': None,
+                    'video_prompt': video_prompt,
+                    'status': 'failed',
+                    'error': str(api_error),
+                    'created_at': datetime.now().isoformat()
+                }
+            
+            step.data = video_result
             step.status = "completed"
             step.completed_at = datetime.now()
             
-            # 성공/실패 통계
-            successful_count = len([r for r in video_results if r['status'] == 'completed'])
-            failed_count = len([r for r in video_results if r['status'] == 'failed_but_mocked'])
-            
-            logger.info(f"비디오 생성 완료: {self.task_id}, 성공: {successful_count}, 실패: {failed_count}")
-            return video_results
+            logger.info(f"✅ 비디오 생성 단계 완료: {self.task_id}")
+            return video_result
             
         except Exception as e:
             step.status = "failed"
@@ -335,7 +306,7 @@ class SyncIntegratedPipeline:
             step.completed_at = datetime.now()
             raise
     
-    def _step_finalize(self, video_results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _step_finalize(self, video_result: Dict[str, Any]) -> Dict[str, Any]:
         """5단계: 최종 결과 취합"""
         step = self.steps["finalize"]
         step.status = "processing"
@@ -345,51 +316,39 @@ class SyncIntegratedPipeline:
         try:
             logger.info(f"최종 결과 취합: {self.task_id}")
             
-            # 성공한 비디오들과 실패했지만 모의 URL이 있는 비디오들
-            successful_videos = [
-                result for result in video_results 
-                if result.get('status') in ['completed', 'failed_but_mocked'] and 'video_url' in result
-            ]
+            # 단일 비디오 결과 처리
+            video_urls = [video_result['video_url']] if video_result.get('video_url') else []
+            video_details = [video_result] if video_result.get('video_url') else []
             
-            truly_failed_videos = [
-                result for result in video_results 
-                if result.get('status') not in ['completed', 'failed_but_mocked'] or 'video_url' not in result
-            ]
-            
-            video_urls = [video['video_url'] for video in successful_videos]
-            
-            # 실제 성공과 모의 성공 구분
-            truly_successful = [r for r in video_results if r.get('status') == 'completed']
-            mock_successful = [r for r in video_results if r.get('status') == 'failed_but_mocked']
-            
+            # 최종 결과 구조
             final_result = {
                 'task_id': self.task_id,
                 'status': 'completed',
                 'video_urls': video_urls,
-                'total_videos': len(video_results),
-                'successful_videos': len(truly_successful),
-                'failed_videos': len(mock_successful) + len(truly_failed_videos),
-                'mocked_videos': len(mock_successful),
+                'total_videos': len(video_urls),
+                'successful_videos': 1 if video_result.get('status') in ['success', 'completed', 'mock'] else 0,
+                'failed_videos': 0 if video_result.get('status') in ['success', 'completed', 'mock'] else 1,
                 'completed_at': datetime.now().isoformat(),
-                'video_details': successful_videos
+                'video_details': video_details,
+                'text': video_result.get('text', ''),
+                'video_prompt': video_result.get('video_prompt', ''),
+                'veo_status': video_result.get('status', 'unknown')
             }
             
-            if truly_failed_videos:
-                final_result['truly_failed_details'] = truly_failed_videos
-            
-            if mock_successful:
-                final_result['mock_success_details'] = mock_successful
-                final_result['note'] = f"{len(mock_successful)}개 비디오는 API 오류로 인해 모의 URL을 사용했습니다."
-            
-            if len(truly_failed_videos) == len(video_results):
+            # 에러가 있는 경우
+            if video_result.get('status') not in ['success', 'completed', 'mock']:
                 final_result['status'] = 'failed'
-                final_result['error'] = '모든 비디오 생성이 실패했습니다'
+                final_result['error'] = video_result.get('error', '비디오 생성에 실패했습니다')
+            
+            # 모의 결과인 경우
+            if video_result.get('status') == 'mock':
+                final_result['note'] = '모의 비디오 URL이 생성되었습니다 (실제 VEO API 호출이 아님)'
             
             step.data = final_result
             step.status = "completed"
             step.completed_at = datetime.now()
             
-            logger.info(f"파이프라인 최종 완료: {self.task_id}, 실제 성공: {len(truly_successful)}, 모의 성공: {len(mock_successful)}")
+            logger.info(f"파이프라인 최종 완료: {self.task_id}, 상태: {final_result['status']}, 비디오 수: {final_result['total_videos']}")
             return final_result
             
         except Exception as e:

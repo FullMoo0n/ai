@@ -26,4 +26,4 @@ Key Instructions:
 Additional Context:
 This is a {{ sentence|length }} character sentence that conveys: {{ sentence }}
 
-Please create a realistic video of Korean Sign Language interpretation for this content. 
+Please create a  video of Korean Sign Language interpretation for this content. 

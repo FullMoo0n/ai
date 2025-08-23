@@ -196,7 +196,7 @@ async def validate_sentences(payload: ValidateRequest = Body(...)):
 
     ### 프롬프트 작성 팁:
     - **구체적으로 작성**: "A red panda riding a skateboard in a sunny park"
-    - **스타일 지정**: "cinematic", "animation", "realistic" 등 스타일 키워드 추가
+    - **스타일 지정**: "cinematic", "animation", "" 등 스타일 키워드 추가
     - **카메라 앵글**: "close-up", "wide shot", "aerial view" 등
     - **분위기**: "bright and cheerful", "dark and mysterious" 등
 
@@ -289,7 +289,7 @@ def generate_veo_video(req: VeoRequest):
 
     ### 프롬프트 작성 팁:
     - **구체적으로 작성**: "A red panda riding a skateboard in a sunny park"
-    - **스타일 지정**: "cinematic", "animation", "realistic" 등 스타일 키워드 추가
+    - **스타일 지정**: "cinematic", "animation", "" 등 스타일 키워드 추가
     - **카메라 앵글**: "close-up", "wide shot", "aerial view" 등
     - **분위기**: "bright and cheerful", "dark and mysterious" 등
 
@@ -694,18 +694,23 @@ async def process_image_to_videos_gemini_veo3(request: PipelineRequest):
         }
     },
     tags=["Pipeline"],
-    summary="이미지에서 수어 동영상 생성 파이프라인 (기존 방식)",
+    summary="이미지에서 수어 동영상 생성 파이프라인 (개선된 방식)",
     description="""
-    ## S3 이미지 URL에서 수어 동영상 생성 (기존 방식)
+    ## S3 이미지 URL에서 수어 동영상 생성 (간소화된 방식)
 
     이 엔드포인트는 다음 과정을 수행합니다:
-    1. S3 이미지에서 텍스트 추출 (OCR)
-    2. 텍스트를 문장별로 분할
-    3. 각 문장을 단어별로 토큰화
-    4. 각 단어의 수어 설명 조회
-    5. 수어 설명으로 비디오 생성 프롬프트 생성
-    6. Veo를 사용한 수어 동영상 생성
-    7. 생성된 동영상들을 S3에 업로드
+    1. **OCR**: S3 이미지에서 텍스트 추출
+    2. **전체 토큰화**: 문장 분할 없이 전체 텍스트를 한번에 토큰화
+    3. **수어 데이터 조회**: 모든 토큰에 대한 수어 설명 수집
+    4. **Gemini 프롬프트 생성**: 전체 텍스트와 수어 데이터로 단일 프롬프트 생성
+    5. **VEO 비디오 생성**: Gemini 프롬프트로 한 개의 통합 수어 동영상 생성
+    6. **S3 업로드**: 생성된 동영상을 S3에 업로드
+
+    ### 주요 개선사항:
+    - ✅ **문장별 분할 제거**: 전체 텍스트를 한번에 처리
+    - ✅ **Gemini AI 1회 호출**: 여러 번 호출 대신 1번의 효율적인 호출
+    - ✅ **단일 비디오 생성**: 여러 개 대신 하나의 통합된 수어 동영상
+    - ✅ **빠른 처리 속도**: 간소화된 파이프라인으로 더 빠른 응답
 
     ### 사용법:
     ```json
@@ -716,12 +721,14 @@ async def process_image_to_videos_gemini_veo3(request: PipelineRequest):
 
     ### 응답:
     - **task_id**: 작업 추적용 고유 ID
-    - **status**: 'processing' (처리 중)
-    - **message**: 상태 메시지
+    - **status**: 'completed' (처리 완료)
+    - **video_urls**: 생성된 비디오 URL (1개)
+    - **video_details**: 비디오 상세 정보
+    - **total_videos**: 총 비디오 수 (1개)
     """
 )
 def process_image_to_videos(request: PipelineRequest):
-    """이미지 처리 및 수어 동영상 생성 파이프라인 시작 (기존 방식)"""
+    """이미지 처리 및 수어 동영상 생성 파이프라인 시작 (개선된 방식)"""
     try:
         # S3 URL 검증
         url_str = str(request.s3_image_url)
