@@ -11,6 +11,7 @@ import asyncio
 import boto3
 import httpx
 import io
+import random
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from botocore.exceptions import NoCredentialsError, ClientError
@@ -389,7 +390,18 @@ class VeoService:
         """
         timestamp = datetime.now().strftime('%H%M%S')
         # mock_filename = f"mock_video_{task_id or 'unknown'}_{timestamp}.mp4"
-        mock_url = f"https://ddo123.s3.ap-northeast-2.amazonaws.com/veo-videos/veo3.mp4"
+        mock_url = random.choice([
+            "https://ddo123.s3.ap-northeast-2.amazonaws.com/veo-videos/veo3.mp4", 
+            "https://ddo123.s3.ap-northeast-2.amazonaws.com/veo-videos/veo_video_unknown_1755932952.mp4",
+            "https://ddo123.s3.ap-northeast-2.amazonaws.com/veo-videos/veo_video_unknown_1755918254.mp4",
+            "https://ddo123.s3.ap-northeast-2.amazonaws.com/veo-videos/veo_video_unknown_1755917379.mp4",
+            "https://ddo123.s3.ap-northeast-2.amazonaws.com/veo-videos/veo_video_unknown_1755924635.mp4",
+            "https://ddo123.s3.ap-northeast-2.amazonaws.com/veo-videos/veo_video_unknown_1755923602.mp4",
+            "https://ddo123.s3.ap-northeast-2.amazonaws.com/veo-videos/veo_video_unknown_1755917716.mp4",
+            "https://ddo123.s3.ap-northeast-2.amazonaws.com/veo-videos/veo_video_unknown_1755917089.mp4",
+            "https://ddo123.s3.ap-northeast-2.amazonaws.com/veo-videos/veo_video_unknown_1755915988.mp4",
+            "https://ddo123.s3.ap-northeast-2.amazonaws.com/veo-videos/veo_video_unknown_1755911869.mp4"
+            ])
         
         logger.info(f"🔄 모의 비디오 결과 생성: {mock_url}")
         
