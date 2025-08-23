@@ -1,6 +1,7 @@
 from typing import Optional, Any, Dict
 from pydantic import BaseModel, Field
 import time
+import os
 
 try:
     from google import genai
@@ -23,7 +24,7 @@ class VeoRequest(BaseModel):
         description="비디오 화면 비율"
     )
     model: Optional[str] = Field(
-        "veo-2.0-generate-001",
+        os.getenv("VEO_MODEL"),
         description="사용할 Veo 모델 버전"
     )
     timeout_seconds: Optional[int] = Field(
@@ -38,7 +39,7 @@ class VeoRequest(BaseModel):
             "example": {
                 "prompt": "A majestic eagle soaring over snow-capped mountains at sunset",
                 "aspect_ratio": "16:9",
-                "model": "veo-2.0-generate-001",
+                "model": os.getenv("VEO_MODEL"),
                 "timeout_seconds": 600
             }
         }
@@ -57,7 +58,7 @@ class VeoAsyncRequest(BaseModel):
         description="비디오 화면 비율"
     )
     model: Optional[str] = Field(
-        "veo-2.0-generate-001",
+        os.getenv("VEO_MODEL"),
         description="사용할 Veo 모델 버전"
     )
     timeout_seconds: Optional[int] = Field(
@@ -72,7 +73,7 @@ class VeoAsyncRequest(BaseModel):
             "example": {
                 "prompt": "A red panda riding a skateboard in a sunny park",
                 "aspect_ratio": "16:9",
-                "model": "veo-2.0-generate-001",
+                "model": os.getenv("VEO_MODEL"),
                 "timeout_seconds": 600
             }
         }

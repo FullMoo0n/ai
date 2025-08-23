@@ -388,8 +388,8 @@ class VeoService:
             Dict: 모의 결과
         """
         timestamp = datetime.now().strftime('%H%M%S')
-        mock_filename = f"mock_video_{task_id or 'unknown'}_{timestamp}.mp4"
-        mock_url = f"https://ddo123.s3.ap-northeast-2.amazonaws.com/videos/{mock_filename}"
+        # mock_filename = f"mock_video_{task_id or 'unknown'}_{timestamp}.mp4"
+        mock_url = f"https://ddo123.s3.ap-northeast-2.amazonaws.com/veo-videos/veo3.mp4"
         
         logger.info(f"🔄 모의 비디오 결과 생성: {mock_url}")
         

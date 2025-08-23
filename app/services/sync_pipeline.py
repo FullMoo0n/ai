@@ -270,7 +270,7 @@ class SyncIntegratedPipeline:
             # 모의 VEO 결과 생성 (실제 비동기 API 대신)
             try:
                 # 실제로는 VEO API 호출이 비동기이므로 모의 결과 생성
-                mock_video_url = f"https://mock-veo-video.com/video_{self.task_id}.mp4"
+                mock_video_url = "https://ddo123.s3.ap-northeast-2.amazonaws.com/veo-videos/veo_video_unknown_1755918254.mp4"
                 
                 video_result = {
                     'text': text,
