@@ -12,10 +12,13 @@ from datetime import datetime
 from .vision_s3 import process_s3_image_with_vision
 from .sentence_segmenter import split_sentences
 from .tokenizer import tokenize
-from .culture_api import get_sign_description
+from .sign_data_service import SignDataService
 from .prompt_template import get_default_prompt_manager
 
 logger = logging.getLogger(__name__)
+
+# Initialize Sign Service
+_sign_data_service = SignDataService()
 
 
 class PipelineError(Exception):
@@ -214,7 +217,8 @@ class IntegratedPipeline:
                 logger.info(f"  🌐 Culture API 호출: '{token}'")
                 
                 try:
-                    description = await get_sign_description(token)
+                    loop = asyncio.get_running_loop()
+                    description = await loop.run_in_executor(None, _sign_data_service.search_sign_description, token)
                     if description and description.strip():
                         # 실제 API 데이터가 있는 경우만 포함
                         sign_data.append({

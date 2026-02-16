@@ -11,7 +11,7 @@ from datetime import datetime
 from .vision_s3 import process_s3_image_with_vision
 from .sentence_segmenter import split_sentences
 from .tokenizer import tokenize
-from .culture_api import get_sign_description
+
 from .prompt_template import get_default_prompt_manager
 from .veo_service import generate_sign_video
 import random
