@@ -1,7 +1,8 @@
 import os
 import sys
+import uuid
 import pandas as pd
-from typing import List
+from typing import List, Tuple
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from openai import OpenAI
@@ -19,15 +20,16 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 # 데이터 파일 경로
 DATA_FILE = "data/문화체육관광부 국립국어원_한국수어사전_한국어대응표현정보_20240909.csv"
 
+
 def init_qdrant_collection(client: QdrantClient):
     """Qdrant 컬렉션 초기화"""
     collections = client.get_collections()
     exists = any(c.name == COLLECTION_NAME for c in collections.collections)
-    
+
     if exists:
         print(f"Collection '{COLLECTION_NAME}' already exists. Recreating...")
         client.delete_collection(COLLECTION_NAME)
-    
+
     # 컬렉션 생성 (OpenAI text-embedding-3-small 차원: 1536)
     client.create_collection(
         collection_name=COLLECTION_NAME,
@@ -38,26 +40,38 @@ def init_qdrant_collection(client: QdrantClient):
     )
     print(f"Collection '{COLLECTION_NAME}' created.")
 
-def get_embeddings(client: OpenAI, texts: List[str]) -> List[List[float]]:
-    """배치로 임베딩 생성"""
-    # 빈 문자열이나 None 제거 및 전처리
-    valid_indices = [i for i, t in enumerate(texts) if t and isinstance(t, str) and t.strip()]
+
+def get_embeddings(
+    client: OpenAI,
+    texts: List[str],
+) -> Tuple[List[List[float]], List[int]]:
+    """배치로 임베딩 생성
+
+    Returns:
+        (embeddings, valid_indices): 임베딩 리스트와 원본 배치 내 유효 인덱스 리스트.
+        두 리스트의 길이는 동일하며, valid_indices[k]는 embeddings[k]에 대응하는
+        원본 texts 리스트 내의 인덱스입니다.
+    """
+    # 유효한 텍스트와 원본 인덱스를 함께 추적
+    valid_indices = [
+        i for i, t in enumerate(texts) if t and isinstance(t, str) and t.strip()
+    ]
     valid_texts = [texts[i].replace("\n", " ") for i in valid_indices]
-    
+
     if not valid_texts:
-        return []
+        return [], []
 
     try:
         response = client.embeddings.create(
             input=valid_texts,
             model="text-embedding-3-small"
         )
-        # 원래 순서대로 매핑 (유효하지 않은 값은 None 처리 등 필요하지만 여기선 단순화)
         embeddings = [data.embedding for data in response.data]
-        return embeddings
+        return embeddings, valid_indices
     except Exception as e:
         print(f"Error generating embeddings: {e}")
-        return []
+        return [], []
+
 
 def ingest_data():
     if not OPENAI_API_KEY:
@@ -67,7 +81,7 @@ def ingest_data():
     # 클라이언트 초기화
     qdrant = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
     openai = OpenAI(api_key=OPENAI_API_KEY)
-    
+
     # CSV 로드
     try:
         df = pd.read_csv(DATA_FILE)
@@ -78,61 +92,68 @@ def ingest_data():
 
     # 컬렉션 초기화
     init_qdrant_collection(qdrant)
-    
+
     # 배치 처리
     batch_size = 100
     total_processed = 0
-    
-    # 데이터프레임 순회
-    # 필요한 컬럼: '한국어 대응표현' (임베딩 대상), '수형설명' (메타데이터), '대/중 분류' (메타데이터)
-    # 컬럼명이 정확한지 확인 필요
-    
+    failed_batches = 0
+
     keywords = df['한국어 대응표현'].astype(str).tolist()
     descriptions = df['수형설명'].astype(str).tolist()
     categories = df['대/중 분류'].astype(str).tolist()
     item_ids = df['수어 표제어 번호'].astype(str).tolist()
 
-    points = []
-    
     for i in range(0, len(df), batch_size):
         batch_end = min(i + batch_size, len(df))
         batch_keywords = keywords[i:batch_end]
-        
-        # 임베딩 생성
-        vectors = get_embeddings(openai, batch_keywords)
-        
+
+        # 임베딩 생성 (유효 인덱스도 함께 반환)
+        vectors, valid_indices = get_embeddings(openai, batch_keywords)
+
         if not vectors:
+            failed_batches += 1
+            print(f"⚠️ Batch {i // batch_size + 1} 실패 (rows {i}-{batch_end - 1})")
             continue
-            
+
         current_batch_points = []
-        for j, vector in enumerate(vectors):
-            idx = i + j
-            
-            # Payload 구성
+        for k, vector in enumerate(vectors):
+            # valid_indices[k]는 배치 내 원본 인덱스 → 전체 인덱스로 변환
+            original_idx = i + valid_indices[k]
+
+            # Point ID: UUID 사용으로 충돌 방지
+            point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"sign-{item_ids[original_idx]}-{original_idx}"))
+
             payload = {
-                "keywords": keywords[idx],
-                "description": descriptions[idx],
-                "category": categories[idx],
-                "item_id": item_ids[idx]
+                "keywords": keywords[original_idx],
+                "description": descriptions[original_idx],
+                "category": categories[original_idx],
+                "item_id": item_ids[original_idx],
             }
-            
+
             point = models.PointStruct(
-                id=int(item_ids[idx]) if item_ids[idx].isdigit() else idx, # ID는 정수 권장
+                id=point_id,
                 vector=vector,
-                payload=payload
+                payload=payload,
             )
             current_batch_points.append(point)
-            
+
         # 업로드
         if current_batch_points:
             qdrant.upsert(
                 collection_name=COLLECTION_NAME,
-                points=current_batch_points
+                points=current_batch_points,
             )
             total_processed += len(current_batch_points)
             print(f"Processed {total_processed}/{len(df)} items...")
 
-    print("Data ingestion completed successfully!")
+    # 요약 로그
+    print("=" * 50)
+    print(f"✅ Data ingestion completed!")
+    print(f"   Total processed: {total_processed}/{len(df)}")
+    if failed_batches:
+        print(f"   ⚠️ Failed batches: {failed_batches}")
+    print("=" * 50)
+
 
 if __name__ == "__main__":
     ingest_data()
