@@ -46,4 +46,10 @@ redis>=5.0.0
 flower>=2.0.0
 
 # AWS S3 업로드
-boto3>=1.28.0 
+boto3>=1.28.0
+
+# Vector DB (Qdrant)
+qdrant-client>=1.7.0
+
+# 데이터 처리
+pandas>=2.0.0

@@ -1,0 +1,133 @@
+import os
+from typing import List, Optional, Dict, Any
+from qdrant_client import QdrantClient
+from qdrant_client.http import models
+from openai import OpenAI
+import logging
+
+# 로거 초기화
+logger = logging.getLogger(__name__)
+
+# 기본 유사도 임계값
+DEFAULT_SCORE_THRESHOLD = 0.7
+
+
+class SignDataService:
+    def __init__(
+        self,
+        score_threshold: Optional[float] = None,
+    ):
+        self.qdrant_host = os.getenv("QDRANT_HOST", "localhost")
+        self.qdrant_port = int(os.getenv("QDRANT_PORT", 6333))
+        self.collection_name = "sign_languages"
+        self.score_threshold = score_threshold or float(
+            os.getenv("QDRANT_SCORE_THRESHOLD", DEFAULT_SCORE_THRESHOLD)
+        )
+
+        # Qdrant Client 초기화 (fail-fast)
+        try:
+            self.client = QdrantClient(host=self.qdrant_host, port=self.qdrant_port)
+            logger.info(f"Connected to Qdrant at {self.qdrant_host}:{self.qdrant_port}")
+        except Exception as e:
+            raise RuntimeError(
+                f"Qdrant 클라이언트 초기화 실패 ({self.qdrant_host}:{self.qdrant_port}): {e}"
+            ) from e
+
+        # OpenAI Client 초기화 (fail-fast)
+        self.openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not self.openai_api_key:
+            raise RuntimeError(
+                "OPENAI_API_KEY 환경변수가 설정되지 않았습니다. 임베딩 검색을 사용할 수 없습니다."
+            )
+        self.openai_client = OpenAI(api_key=self.openai_api_key)
+
+    def _get_embedding(self, text: str) -> List[float]:
+        """텍스트를 임베딩 벡터로 변환
+
+        Raises:
+            RuntimeError: OpenAI API 호출 실패 시
+        """
+        text = text.replace("\n", " ")
+        try:
+            response = self.openai_client.embeddings.create(
+                input=[text],
+                model="text-embedding-3-small"
+            )
+            return response.data[0].embedding
+        except Exception as e:
+            raise RuntimeError(f"임베딩 생성 실패 ('{text[:30]}...'): {e}") from e
+
+    def search_sign_description(self, keyword: str, limit: int = 1) -> Optional[str]:
+        """
+        키워드로 수어 설명을 검색합니다.
+
+        Args:
+            keyword: 검색할 단어
+            limit: 반환할 결과 수
+
+        Returns:
+            가장 적합한 수어 설명 (없으면 None)
+
+        Raises:
+            RuntimeError: 임베딩 생성 또는 Qdrant 검색 실패 시
+        """
+        # 1. 키워드 임베딩
+        query_vector = self._get_embedding(keyword)
+
+        # 2. 벡터 검색
+        try:
+            response = self.client.query_points(
+                collection_name=self.collection_name,
+                query=query_vector,
+                limit=limit,
+                score_threshold=self.score_threshold,
+            )
+            search_result = response.points
+        except Exception as e:
+            raise RuntimeError(f"Qdrant 검색 실패 ('{keyword}'): {e}") from e
+
+        if not search_result:
+            logger.info(
+                f"No sign description found for '{keyword}' "
+                f"(threshold={self.score_threshold})"
+            )
+            return None
+
+        # 가장 높은 점수의 결과 반환
+        top_result = search_result[0]
+        description = top_result.payload.get("description")
+
+        logger.info(
+            f"Found match for '{keyword}': "
+            f"{top_result.payload.get('keywords')} "
+            f"(Score: {top_result.score:.4f}, threshold={self.score_threshold})"
+        )
+        return description
+
+    def get_service_status(self) -> Dict[str, Any]:
+        """서비스 상태 확인"""
+        status = {
+            "qdrant_connection": False,
+            "openai_connection": True,
+            "collection_exists": False,
+            "document_count": 0,
+            "score_threshold": self.score_threshold,
+        }
+
+        try:
+            collections = self.client.get_collections()
+            status["qdrant_connection"] = True
+
+            # 컬렉션 존재 여부 확인
+            for col in collections.collections:
+                if col.name == self.collection_name:
+                    status["collection_exists"] = True
+                    count_result = self.client.count(
+                        collection_name=self.collection_name
+                    )
+                    status["document_count"] = count_result.count
+                    break
+        except Exception as e:
+            logger.warning(f"Qdrant 상태 확인 실패: {e}")
+
+        return status

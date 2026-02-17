@@ -36,7 +36,8 @@ from .services.vision_ocr import (
     extract_paragraphs_spatial_proximity_advanced,
 )
 from .schemas.culture import CultureRequest, CultureResponse
-from .services.culture_api import get_sign_description
+from .services.sign_data_service import SignDataService
+from fastapi.concurrency import run_in_threadpool
 from .services.gemini_service import GeminiService
 from .schemas.veo import (
     VeoRequest, VeoResponse, ErrorResponse,
@@ -49,6 +50,9 @@ from .tasks.veo_tasks import generate_veo_video_task
 
 # .env 로드
 load_dotenv()
+
+# Initialize Services
+sign_data_service = SignDataService()
 
 app = FastAPI(title="Vision OCR Wrapper", version="1.5.0")
 
@@ -505,7 +509,7 @@ async def get_culture_sign_description(request: CultureRequest):
         raise HTTPException(status_code=400, detail="키워드가 필요합니다.")
     
     try:
-        sign_description = await get_sign_description(request.keyword.strip())
+        sign_description = await run_in_threadpool(sign_data_service.search_sign_description, request.keyword.strip())
         
         return CultureResponse(
             keyword=request.keyword.strip(),

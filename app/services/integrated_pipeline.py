@@ -12,10 +12,13 @@ from datetime import datetime
 from .vision_s3 import process_s3_image_with_vision
 from .sentence_segmenter import split_sentences
 from .tokenizer import tokenize
-from .culture_api import get_sign_description
+from .sign_data_service import SignDataService
 from .prompt_template import get_default_prompt_manager
 
 logger = logging.getLogger(__name__)
+
+# Initialize Sign Service
+_sign_data_service = SignDataService()
 
 
 class PipelineError(Exception):
@@ -167,7 +170,7 @@ class IntegratedPipeline:
             raise
     
     async def _step_process_sentences(self, sentences: List[str]) -> Dict[str, Any]:
-        """3단계: 문장별 Culture API 호출 및 프롬프트 생성 -> 통합 토큰 처리로 변경"""
+        """3단계: 문장별 Qdrant 벡터 검색 및 프롬프트 생성 -> 통합 토큰 처리로 변경"""
         step = self.steps["sentence_processing"]
         step.status = "processing"
         step.started_at = datetime.now()
@@ -197,40 +200,58 @@ class IntegratedPipeline:
             logger.info(f"📝 전체 토큰 수: {len(all_tokens)}")
             logger.info(f"🔍 고유 토큰 수: {len(unique_tokens)}")
             
-            # Culture API 호출
+            # Qdrant 벡터 검색
             sign_data = []
             api_total_count = 0
             api_success_count = 0
             
-            logger.info(f"🌐 Culture API 호출 시작: {len(unique_tokens)}개 토큰")
-            
-            for token in unique_tokens:
-                # 의미있는 토큰만 처리 (길이 1 이상, 공백/구두점 제외)
-                if len(token.strip()) <= 1 or token in ['·', '!', '?', '.', ',', "'", '"']:
-                    logger.info(f"  ⏭️ 토큰 건너뛰기: '{token}' (의미 없는 토큰)")
-                    continue
-                
-                api_total_count += 1
-                logger.info(f"  🌐 Culture API 호출: '{token}'")
-                
-                try:
-                    description = await get_sign_description(token)
-                    if description and description.strip():
-                        # 실제 API 데이터가 있는 경우만 포함
-                        sign_data.append({
-                            'word': token,
-                            'description': description,
-                            'culture_data': {'description': description}
-                        })
-                        api_success_count += 1
-                        logger.info(f"    ✅ API 성공: '{token}'")
-                        logger.info(f"    📝 수어 설명 전문: {description}")
-                    else:
-                        logger.info(f"    ❌ API 데이터 없음: '{token}' (프롬프트에서 제외)")
-                except Exception as e:
-                    logger.warning(f"    🚨 API 오류: '{token}' - {str(e)} (프롬프트에서 제외)")
-            
-            logger.info(f"📊 Culture API 결과: {api_success_count}/{api_total_count} 성공")
+            logger.info(f"🌐 Qdrant 벡터 검색 시작: {len(unique_tokens)}개 토큰")
+
+            # 의미 있는 토큰만 필터링
+            meaningful_tokens = [
+                token for token in unique_tokens
+                if len(token.strip()) > 1 and token not in ['·', '!', '?', '.', ',', "'", '"']
+            ]
+            skipped_count = len(unique_tokens) - len(meaningful_tokens)
+            if skipped_count:
+                logger.info(f"  ⏭️ 의미 없는 토큰 {skipped_count}개 건너뜀")
+
+            api_total_count = len(meaningful_tokens)
+
+            # 동시성 제어용 세마포어 (Copilot Review #3 반영)
+            sem = asyncio.Semaphore(5)
+
+            async def _search_token(token: str) -> dict | None:
+                """개별 토큰을 비동기로 검색 (세마포어 적용)"""
+                async with sem:
+                    try:
+                        loop = asyncio.get_running_loop()
+                        description = await loop.run_in_executor(
+                            None, _sign_data_service.search_sign_description, token
+                        )
+                        if description and description.strip():
+                            logger.info(f"    ✅ 검색 성공: '{token}'")
+                            logger.info(f"    📝 수어 설명 전문: {description}")
+                            return {
+                                'word': token,
+                                'description': description,
+                                'culture_data': {'description': description}
+                            }
+                        else:
+                            logger.info(f"    ❌ 데이터 없음: '{token}' (프롬프트에서 제외)")
+                            return None
+                    except Exception as e:
+                        logger.warning(f"    🚨 검색 오류: '{token}' - {str(e)} (프롬프트에서 제외)")
+                        return None
+
+            # 병렬 검색 실행
+            results = await asyncio.gather(
+                *[_search_token(t) for t in meaningful_tokens]
+            )
+            sign_data = [r for r in results if r is not None]
+            api_success_count = len(sign_data)
+
+            logger.info(f"📊 Qdrant 검색 결과: {api_success_count}/{api_total_count} 성공")
             logger.info(f"📚 프롬프트 포함 수어 데이터: {len(sign_data)}개")
             
             # 통합 프롬프트 생성
