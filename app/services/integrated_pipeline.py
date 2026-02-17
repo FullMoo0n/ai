@@ -218,27 +218,31 @@ class IntegratedPipeline:
 
             api_total_count = len(meaningful_tokens)
 
+            # 동시성 제어용 세마포어 (Copilot Review #3 반영)
+            sem = asyncio.Semaphore(5)
+
             async def _search_token(token: str) -> dict | None:
-                """개별 토큰을 비동기로 검색"""
-                try:
-                    loop = asyncio.get_running_loop()
-                    description = await loop.run_in_executor(
-                        None, _sign_data_service.search_sign_description, token
-                    )
-                    if description and description.strip():
-                        logger.info(f"    ✅ 검색 성공: '{token}'")
-                        logger.info(f"    📝 수어 설명 전문: {description}")
-                        return {
-                            'word': token,
-                            'description': description,
-                            'culture_data': {'description': description}
-                        }
-                    else:
-                        logger.info(f"    ❌ 데이터 없음: '{token}' (프롬프트에서 제외)")
+                """개별 토큰을 비동기로 검색 (세마포어 적용)"""
+                async with sem:
+                    try:
+                        loop = asyncio.get_running_loop()
+                        description = await loop.run_in_executor(
+                            None, _sign_data_service.search_sign_description, token
+                        )
+                        if description and description.strip():
+                            logger.info(f"    ✅ 검색 성공: '{token}'")
+                            logger.info(f"    📝 수어 설명 전문: {description}")
+                            return {
+                                'word': token,
+                                'description': description,
+                                'culture_data': {'description': description}
+                            }
+                        else:
+                            logger.info(f"    ❌ 데이터 없음: '{token}' (프롬프트에서 제외)")
+                            return None
+                    except Exception as e:
+                        logger.warning(f"    🚨 검색 오류: '{token}' - {str(e)} (프롬프트에서 제외)")
                         return None
-                except Exception as e:
-                    logger.warning(f"    🚨 검색 오류: '{token}' - {str(e)} (프롬프트에서 제외)")
-                    return None
 
             # 병렬 검색 실행
             results = await asyncio.gather(

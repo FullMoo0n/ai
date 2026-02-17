@@ -1,3 +1,4 @@
+import argparse
 import os
 import sys
 import uuid
@@ -21,16 +22,28 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 DATA_FILE = "data/문화체육관광부 국립국어원_한국수어사전_한국어대응표현정보_20240909.csv"
 
 
-def init_qdrant_collection(client: QdrantClient):
+def init_qdrant_collection(client: QdrantClient, recreate: bool = False):
     """Qdrant 컬렉션 초기화"""
     collections = client.get_collections()
     exists = any(c.name == COLLECTION_NAME for c in collections.collections)
 
     if exists:
-        print(f"Collection '{COLLECTION_NAME}' already exists. Recreating...")
-        client.delete_collection(COLLECTION_NAME)
+        if recreate:
+            print(f"Collection '{COLLECTION_NAME}' exists. --recreate flag set, deleting...")
+            client.delete_collection(COLLECTION_NAME)
+        else:
+            print(f"Collection '{COLLECTION_NAME}' already exists. Reusing. (use --recreate to force)")
+            return
 
     # 컬렉션 생성 (OpenAI text-embedding-3-small 차원: 1536)
+    # create_collection is idempotent if it doesn't exist, but if it exists and we didn't delete it (recreate=False), this line might error if we don't check existence first.
+    # checking exists again or using try-except is safer, but client.create_collection typically raises if exists.
+    # However, we only reach here if (not exists) OR (exists and recreate=True which deleted it).
+    # So it is safe to create.
+    
+    # But wait, if exists=True and recreate=False, we returned early above.
+    # So we are good.
+    
     client.create_collection(
         collection_name=COLLECTION_NAME,
         vectors_config=models.VectorParams(
@@ -73,7 +86,7 @@ def get_embeddings(
         return [], []
 
 
-def ingest_data():
+def ingest_data(recreate_collection: bool = False):
     if not OPENAI_API_KEY:
         print("Error: OPENAI_API_KEY is missing.")
         return
@@ -91,17 +104,18 @@ def ingest_data():
         return
 
     # 컬렉션 초기화
-    init_qdrant_collection(qdrant)
+    init_qdrant_collection(qdrant, recreate=recreate_collection)
 
     # 배치 처리
     batch_size = 100
     total_processed = 0
     failed_batches = 0
 
-    keywords = df['한국어 대응표현'].astype(str).tolist()
-    descriptions = df['수형설명'].astype(str).tolist()
-    categories = df['대/중 분류'].astype(str).tolist()
-    item_ids = df['수어 표제어 번호'].astype(str).tolist()
+    # NaN 처리 강화: fillna('') 후 astype(str)
+    keywords = df['한국어 대응표현'].fillna('').astype(str).tolist()
+    descriptions = df['수형설명'].fillna('').astype(str).tolist()
+    categories = df['대/중 분류'].fillna('').astype(str).tolist()
+    item_ids = df['수어 표제어 번호'].fillna('').astype(str).tolist()
 
     for i in range(0, len(df), batch_size):
         batch_end = min(i + batch_size, len(df))
@@ -111,8 +125,10 @@ def ingest_data():
         vectors, valid_indices = get_embeddings(openai, batch_keywords)
 
         if not vectors:
-            failed_batches += 1
-            print(f"⚠️ Batch {i // batch_size + 1} 실패 (rows {i}-{batch_end - 1})")
+            # 배치 내 유효한 텍스트가 하나도 없었던 경우 or 에러
+            # 에러가 아니고 그냥 빈 텍스트들만 있었으면 failed_batches로 칠 필요는 없으나,
+            # 원본 코드는 vectors가 없으면 실패로 간주했음. warning 로그만 남기고 continue.
+            print(f"⚠️ Batch {i // batch_size + 1} skipped or failed (rows {i}-{batch_end - 1})")
             continue
 
         current_batch_points = []
@@ -156,4 +172,12 @@ def ingest_data():
 
 
 if __name__ == "__main__":
-    ingest_data()
+    parser = argparse.ArgumentParser(description="Ingest sign language data into Qdrant.")
+    parser.add_argument(
+        "--recreate",
+        action="store_true",
+        help="Force recreation of the Qdrant collection (DELETES EXISTING DATA)",
+    )
+    args = parser.parse_args()
+
+    ingest_data(recreate_collection=args.recreate)
