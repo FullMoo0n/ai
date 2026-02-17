@@ -3,6 +3,11 @@ from io import BytesIO
 from pathlib import Path
 import os
 import time
+import logging
+
+# 로깅 설정
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body
 from fastapi.responses import JSONResponse
@@ -39,6 +44,7 @@ from .schemas.culture import CultureRequest, CultureResponse
 from .services.sign_data_service import SignDataService
 from fastapi.concurrency import run_in_threadpool
 from .services.gemini_service import GeminiService
+from .services.llm_service import get_llm_service
 from .schemas.veo import (
     VeoRequest, VeoResponse, ErrorResponse,
     VeoAsyncRequest, VeoAsyncResponse, VeoTaskStatus
@@ -624,8 +630,8 @@ async def process_image_to_videos_gemini_veo3(request: PipelineRequest):
         # 작업 ID 생성
         task_id = f"gemini_veo3_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
         
-        print(f"🚀 Gemini + Veo3 통합 파이프라인 시작: {task_id}")
-        print(f"📸 S3 이미지 URL: {url_str}")
+        logger.info(f"🚀 Gemini + Veo3 통합 파이프라인 시작: {task_id}")
+        logger.info(f"📸 S3 이미지 URL: {url_str}")
         
         # Gemini + Veo3 통합 파이프라인 실행
         from app.services.integrated_pipeline import IntegratedPipeline
@@ -635,8 +641,8 @@ async def process_image_to_videos_gemini_veo3(request: PipelineRequest):
             pipeline = IntegratedPipeline(task_id)
             result = await pipeline.execute(url_str)
             
-            print(f"✅ 파이프라인 실행 완료: {task_id}")
-            print(f"📊 결과: {result}")
+            logger.info(f"✅ 파이프라인 실행 완료: {task_id}")
+            logger.info(f"📊 결과: {result}")
             
             # 결과를 응답 형식으로 변환
             video_urls = []
@@ -660,11 +666,11 @@ async def process_image_to_videos_gemini_veo3(request: PipelineRequest):
                 error=None
             )
             
-            print(f"🎉 응답 생성 완료: {len(video_urls)}개 비디오 URL")
+            logger.info(f"🎉 응답 생성 완료: {len(video_urls)}개 비디오 URL")
             return response
             
         except Exception as pipeline_error:
-            print(f"❌ 파이프라인 실행 중 오류: {pipeline_error}")
+            logger.error(f"❌ 파이프라인 실행 중 오류: {pipeline_error}")
             raise HTTPException(
                 status_code=500,
                 detail=f"파이프라인 실행 중 오류 발생: {str(pipeline_error)}"
@@ -673,7 +679,7 @@ async def process_image_to_videos_gemini_veo3(request: PipelineRequest):
     except HTTPException as e:
         raise e
     except Exception as e:
-        print(f"❌ 예상치 못한 오류: {e}")
+        logger.error(f"❌ 예상치 못한 오류: {e}")
         raise HTTPException(
             status_code=500, 
             detail=f"파이프라인 시작 중 오류 발생: {str(e)}"

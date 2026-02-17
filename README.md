@@ -8,7 +8,7 @@ Google Veo 3를 활용한 텍스트-to-비디오 생성 API와 OCR, 문장 분�
 - **문장 분리**: 텍스트를 문장 단위로 분리
 - **토큰화**: 문장을 단어 단위로 분리
 - **문장 검증**: OpenAI를 활용한 문장 분리 품질 검증
-- **문장 분석**: Google Gemini를 활용한 한국어 문장 형태소 분석
+- **문장 분석**: LLM(Ollama/OpenAI)을 활용한 한국어 문장 형태소 분석 및 비디오 프롬프트 생성
 - **비디오 생성**: Google Veo 3를 활용한 텍스트-to-비디오 생성 (동기/비동기)
 - **S3 업로드**: 생성된 비디오를 자동으로 AWS S3에 업로드
 
@@ -82,8 +82,10 @@ cp .env.example .env
 - `VEO_API_KEY`: Google Veo3 API 키 (비디오 생성용)
 - `VEO_MODEL`: Veo3 모델명 (기본: veo-3.0-generate-preview)
 - `VEO_OUTPUT_GCS_URI`: 출력 비디오 GCS URI (예: gs://your-bucket/your-prefix)
-- `GOOGLE_API_KEY`: Google Gemini API 키 (Veo 비디오 생성 및 문장 분석용)
-- `OPENAI_API_KEY`: OpenAI API 키 (문장 검증용)
+- `LLM_PROVIDER`: LLM 제공자 (`ollama` 또는 `openai`, 기본: `ollama`)
+- `OLLAMA_BASE_URL`: Ollama API 주소 (기본: `http://localhost:11434/v1`)
+- `OLLAMA_MODEL`: Ollama 모델명 (기본: `qwen2.5:7b-instruct-q4_K_M`)
+- `OPENAI_API_KEY`: OpenAI API 키 (LLM_PROVIDER=openai 사용 시 또는 문장 검증용)
 - `REDIS_URL`: Redis 연결 URL (기본: redis://localhost:6379/0)
 
 S3 업로드를 위한 환경 변수:
@@ -223,9 +225,9 @@ curl -X POST "http://localhost:8000/veo" \
   }'
 ```
 
-### 문장 분석 (Gemini)
+### 문장 분석 (LLM 통합)
 
-Google Gemini API를 사용하여 한국어 문장을 분석하고 핵심 형태소를 추출합니다:
+설정된 LLM(Ollama 또는 OpenAI)을 사용하여 한국어 문장을 분석하고 핵심 형태소를 추출합니다:
 
 ```bash
 curl -X POST "http://localhost:8000/analyze-sentences" \
