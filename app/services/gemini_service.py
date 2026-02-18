@@ -16,7 +16,8 @@ class GeminiService:
         GeminiService 초기화 (하위 호환성 유지, 내부적으로 LLMService 사용)
         
         Args:
-            api_key (str): (더 이상 사용되지 않음) 개별 인스턴스용 API 키.
+            api_key (str): .. deprecated::
+                (더 이상 사용되지 않음) 개별 인스턴스용 API 키.
                 현재는 무시되며, LLMService가 환경 변수에서 API 키를 자동 로드합니다.
         """
         if api_key is not None:

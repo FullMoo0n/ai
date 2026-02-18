@@ -71,11 +71,11 @@ class LLMService:
     def _validate_ollama_base_url(self, base_url: str) -> None:
         """Validate OLLAMA_BASE_URL to prevent SSRF attacks.
         
+        Logs a warning if the base URL is not localhost, as remote Ollama
+        servers may pose security risks.
+        
         Args:
             base_url: The base URL to validate
-            
-        Raises:
-            ValueError: If the base URL is not in the whitelist
         """
         # Allow localhost and 127.0.0.1 for local development
         allowed_prefixes = [
