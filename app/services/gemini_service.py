@@ -4,21 +4,26 @@ from typing import Dict, List, Any
 from pathlib import Path
 
 from .llm_service import get_llm_service, LLMService
+from app.utils.text_utils import clean_markdown_json_response
 
 logger = logging.getLogger(__name__)
 
 class GeminiService:
-    """Gemini API를 사용하여 한국어 문장 분석을 수행하는 서비스"""
+    """LLM을 사용하여 한국어 문장 분석을 수행하는 서비스 (하위 호환성을 위해 GeminiService 이름 유지)"""
     
     def __init__(self, api_key: str = None):
         """
         GeminiService 초기화 (하위 호환성 유지, 내부적으로 LLMService 사용)
         
         Args:
-            api_key (str): API 키 (무시됨 - LLMService가 환경 변수에서 자동 로드)
+            api_key (str): (더 이상 사용되지 않음) 개별 인스턴스용 API 키.
+                현재는 무시되며, LLMService가 환경 변수에서 API 키를 자동 로드합니다.
         """
-        if api_key:
-            logger.warning("GeminiService 초기화 시 api_key가 제공되었으나 무시됩니다. LLMService는 환경 변수에서 설정을 로드합니다.")
+        if api_key is not None:
+            logger.warning(
+                "GeminiService(api_key=...) 파라미터는 더 이상 사용되지 않으며 무시됩니다. "
+                "API 키는 환경 변수 또는 LLMService 설정을 통해 구성하세요."
+            )
         self.llm = get_llm_service()
         logger.info(f"GeminiService 초기화 완료 (LLMService 위임: provider={self.llm.provider})")
     
@@ -68,8 +73,9 @@ class GeminiService:
                 )
                 logger.info("LLM JSON 응답 파싱 성공")
                 return result
-            except Exception as e:
-                logger.warning(f"LLM JSON 응답 파싱 실패, 텍스트로 재시도: {e}")
+            except json.JSONDecodeError as json_error:
+                # JSON 파싱 실패 - 텍스트 재시도가 의미 있음
+                logger.warning(f"LLM JSON 응답 파싱 실패, 텍스트로 재시도: {json_error}")
                 
                 # JSON 파싱 실패 시 텍스트로 시도
                 text = self.llm.generate_text(
@@ -87,15 +93,9 @@ class GeminiService:
                 # JSON 파싱 시도
                 try:
                     # 마크다운 코드 블록 제거
-                    cleaned = text.strip()
-                    if cleaned.startswith('```json'):
-                        cleaned = cleaned[7:]
-                    if cleaned.startswith('```'):
-                        cleaned = cleaned[3:]
-                    if cleaned.endswith('```'):
-                        cleaned = cleaned[:-3]
+                    cleaned = clean_markdown_json_response(text)
                     
-                    result = json.loads(cleaned.strip())
+                    result = json.loads(cleaned)
                     logger.info("JSON 파싱 성공")
                     return result
                     
@@ -103,6 +103,18 @@ class GeminiService:
                     logger.warning(f"JSON 파싱 실패: {e2}")
                     logger.info("기본 형태소 분석 결과 반환")
                     return self._get_default_analysis_result(input_text)
+            except (ConnectionError, TimeoutError) as network_error:
+                # 네트워크 오류 - 텍스트 재시도도 실패할 가능성 높음
+                logger.error(f"LLM 네트워크 오류: {network_error}")
+                raise
+            except ValueError as auth_error:
+                # 인증/설정 오류 - 텍스트 재시도도 실패할 것
+                logger.error(f"LLM 인증/설정 오류: {auth_error}")
+                raise
+            except Exception as e:
+                # 기타 예상치 못한 오류
+                logger.error(f"LLM 호출 중 예상치 못한 오류: {e}")
+                raise
                 
         except Exception as e:
             logger.error(f"문장 분석 중 오류 발생: {e}")
