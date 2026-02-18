@@ -35,7 +35,7 @@ class VeoRequest(BaseModel):
     )
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "prompt": "A majestic eagle soaring over snow-capped mountains at sunset",
                 "aspect_ratio": "16:9",
@@ -69,7 +69,7 @@ class VeoAsyncRequest(BaseModel):
     )
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "prompt": "A red panda riding a skateboard in a sunny park",
                 "aspect_ratio": "16:9",

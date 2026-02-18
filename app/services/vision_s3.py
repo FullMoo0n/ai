@@ -77,22 +77,28 @@ async def process_s3_image_with_vision(
         VisionS3APIError: Vision API 호출 오류
     """
     try:
-        # 1. S3 URL 형식 검증
-        if not validate_s3_url_format(s3_url):
-            raise VisionS3URLError(f"유효하지 않은 S3 URL 형식입니다: {s3_url}")
+        is_s3_url = validate_s3_url_format(s3_url)
         
-        logger.info(f"S3 이미지 OCR 처리 시작: {s3_url}")
-        
-        # 2. S3 객체 존재 여부 확인
-        if not check_s3_object_exists(s3_url):
-            raise VisionS3URLError(f"S3 객체를 찾을 수 없거나 접근할 수 없습니다: {s3_url}")
-        
-        # 3. 공개 URL 생성 (Google Vision API에서 접근 가능하도록)
-        try:
-            public_url = get_s3_public_url(s3_url, expires_in=3600)  # 1시간 유효
-            logger.info(f"S3 presigned URL 생성 완료")
-        except Exception as e:
-            raise VisionS3URLError(f"S3 공개 URL 생성 실패: {str(e)}")
+        if is_s3_url:
+            # S3 로직: 객체 확인 및 Presigned URL 생성
+            logger.info(f"S3 이미지 OCR 처리 시작: {s3_url}")
+            
+            if not check_s3_object_exists(s3_url):
+                raise VisionS3URLError(f"S3 객체를 찾을 수 없거나 접근할 수 없습니다: {s3_url}")
+            
+            try:
+                public_url = get_s3_public_url(s3_url, expires_in=3600)  # 1시간 유효
+                logger.info(f"S3 presigned URL 생성 완료")
+            except Exception as e:
+                raise VisionS3URLError(f"S3 공개 URL 생성 실패: {str(e)}")
+                
+        elif s3_url.startswith("http://") or s3_url.startswith("https://"):
+            # 일반 URL 로직: S3 검증 없이 그대로 사용 (Azure 등)
+            logger.info(f"일반 웹 이미지 URL 감지: {s3_url} (S3 로직 우회)")
+            public_url = s3_url
+            
+        else:
+            raise VisionS3URLError(f"유효하지 않은 이미지 URL 형식입니다 (S3 또는 HTTP/HTTPS 만 지원): {s3_url}")
         
         # 4. Vision API 페이로드 구성 (URL 방식)
         if language_hints is None:
