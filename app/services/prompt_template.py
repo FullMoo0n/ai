@@ -5,6 +5,8 @@ from typing import Dict, List, Any, Optional
 from pathlib import Path
 import jinja2
 
+from .llm_service import get_llm_service
+
 logger = logging.getLogger(__name__)
 
 
@@ -138,8 +140,6 @@ class PromptTemplateManager:
             
             # LLMService를 사용하여 프롬프트 생성
             try:
-                from .llm_service import get_llm_service
-                
                 llm = get_llm_service()
                 
                 logger.info(f"🤖 LLM에게 비디오 프롬프트 생성 요청: '{sentence[:30]}...'")
@@ -153,7 +153,16 @@ class PromptTemplateManager:
                     logger.info(f"✅ LLM 프롬프트 생성 완료: {len(generated_prompt)}자")
                     return generated_prompt
                 else:
-                    logger.warning("⚠️ LLM 응답이 비어있음, 폴백 프롬프트 사용")
+                    # 빈 응답은 비정상 상황일 수 있으므로, 디버깅을 위한 LLM 컨텍스트를 함께 로그로 남긴다.
+                    provider = getattr(llm, "provider", None)
+                    model = getattr(llm, "model", None) or getattr(llm, "model_name", None)
+                    llm_class = llm.__class__.__name__
+                    logger.warning(
+                        "⚠️ LLM 응답이 비어있음, 폴백 프롬프트 사용 (provider=%s, model=%s, llm_class=%s)",
+                        provider,
+                        model,
+                        llm_class,
+                    )
                     return self._create_fallback_prompt(sentence, sign_data)
                     
             except Exception as e:

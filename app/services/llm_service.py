@@ -12,6 +12,7 @@ from typing import Optional
 import threading
 
 from openai import OpenAI
+from app.utils.text_utils import clean_markdown_json_response
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,8 @@ class LLMService:
             self.base_url = base_url or os.getenv(
                 "OLLAMA_BASE_URL", "http://localhost:11434/v1"
             )
+            # Validate OLLAMA_BASE_URL to prevent SSRF attacks
+            self._validate_ollama_base_url(self.base_url)
             self.model = model or os.getenv(
                 "OLLAMA_MODEL", "qwen2.5:7b-instruct-q4_K_M"
             )
@@ -63,6 +66,29 @@ class LLMService:
             raise ValueError(
                 f"지원하지 않는 LLM_PROVIDER: {self.provider}. "
                 "'ollama' 또는 'openai'를 사용하세요."
+            )
+
+    def _validate_ollama_base_url(self, base_url: str) -> None:
+        """Validate OLLAMA_BASE_URL to prevent SSRF attacks.
+        
+        Logs a warning if the base URL is not localhost, as remote Ollama
+        servers may pose security risks.
+        
+        Args:
+            base_url: The base URL to validate
+        """
+        # Allow localhost and 127.0.0.1 for local development
+        allowed_prefixes = [
+            "http://localhost:",
+            "http://127.0.0.1:",
+            "https://localhost:",
+            "https://127.0.0.1:",
+        ]
+        
+        if not any(base_url.startswith(prefix) for prefix in allowed_prefixes):
+            logger.warning(
+                f"⚠️ OLLAMA_BASE_URL이 localhost가 아님: {base_url}. "
+                "원격 Ollama 서버를 사용하는 경우 보안에 유의하세요."
             )
 
     def generate_text(
@@ -164,13 +190,7 @@ class LLMService:
             content = response.choices[0].message.content.strip()
 
             # 마크다운 코드 블록 제거 (Ollama 모델들이 가끔 추가함)
-            if content.startswith("```json"):
-                content = content[7:]
-            if content.startswith("```"):
-                content = content[3:]
-            if content.endswith("```"):
-                content = content[:-3]
-            content = content.strip()
+            content = clean_markdown_json_response(content)
 
             result = json.loads(content)
             logger.info(f"📥 LLM JSON 응답 파싱 성공")
