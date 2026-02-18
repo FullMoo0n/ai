@@ -17,6 +17,8 @@ class GeminiService:
         Args:
             api_key (str): API 키 (무시됨 - LLMService가 환경 변수에서 자동 로드)
         """
+        if api_key:
+            logger.warning("GeminiService 초기화 시 api_key가 제공되었으나 무시됩니다. LLMService는 환경 변수에서 설정을 로드합니다.")
         self.llm = get_llm_service()
         logger.info(f"GeminiService 초기화 완료 (LLMService 위임: provider={self.llm.provider})")
     

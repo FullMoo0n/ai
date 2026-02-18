@@ -6,7 +6,6 @@ import time
 import logging
 
 # 로깅 설정
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body
@@ -44,7 +43,6 @@ from .schemas.culture import CultureRequest, CultureResponse
 from .services.sign_data_service import SignDataService
 from fastapi.concurrency import run_in_threadpool
 from .services.gemini_service import GeminiService
-from .services.llm_service import get_llm_service
 from .schemas.veo import (
     VeoRequest, VeoResponse, ErrorResponse,
     VeoAsyncRequest, VeoAsyncResponse, VeoTaskStatus
@@ -168,7 +166,7 @@ async def validate_sentences(payload: ValidateRequest = Body(...)):
         result = evaluate_segmentation_with_openai(
             text=payload.text,
             sentences=payload.sentences,
-            model="gpt-4.1-mini",
+            model="gpt-4o-mini",
         )
         return ValidateResponse(**result)
     except Exception as e:

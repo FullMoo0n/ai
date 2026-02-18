@@ -9,6 +9,7 @@ import os
 import json
 import logging
 from typing import Optional
+import threading
 
 from openai import OpenAI
 
@@ -52,7 +53,7 @@ class LLMService:
                 raise ValueError(
                     "OPENAI_API_KEY 환경 변수가 설정되지 않았습니다."
                 )
-            self.model = model or os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+            self.model = model or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
             self.base_url = None
             self.client = OpenAI(api_key=self.api_key)
             logger.info(
@@ -142,6 +143,7 @@ class LLMService:
         messages.append({"role": "system", "content": base_system})
         messages.append({"role": "user", "content": prompt})
 
+        content = ""
         try:
             logger.info(
                 f"📤 LLM JSON 요청: provider={self.provider}, model={model}"
@@ -183,8 +185,9 @@ class LLMService:
             raise
 
 
-# 전역 싱글턴 인스턴스
+# 전역 싱글턴 인스턴스와 락
 _llm_service: Optional[LLMService] = None
+_llm_service_lock = threading.Lock()
 
 
 def get_llm_service() -> LLMService:
@@ -195,5 +198,7 @@ def get_llm_service() -> LLMService:
     """
     global _llm_service
     if _llm_service is None:
-        _llm_service = LLMService()
+        with _llm_service_lock:
+            if _llm_service is None:
+                _llm_service = LLMService()
     return _llm_service
