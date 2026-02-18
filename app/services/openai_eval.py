@@ -11,7 +11,7 @@ def _client() -> OpenAI:
 def evaluate_segmentation_with_openai(
     text: str,
     sentences: List[str],
-    model: str = "gpt-4.1-mini",
+    model: str = "gpt-4o-mini",
 ) -> Dict[str, Any]:
     """
     원문 text와 분리된 sentences를 넘기면,

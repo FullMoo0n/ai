@@ -3,39 +3,24 @@ import logging
 from typing import Dict, List, Any
 from pathlib import Path
 
-try:
-    import google.generativeai as genai
-    GEMINI_AVAILABLE = True
-except ImportError:
-    GEMINI_AVAILABLE = False
-    genai = None
+from .llm_service import get_llm_service, LLMService
 
 logger = logging.getLogger(__name__)
 
 class GeminiService:
     """Gemini API를 사용하여 한국어 문장 분석을 수행하는 서비스"""
     
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str = None):
         """
-        GeminiService 초기화
+        GeminiService 초기화 (하위 호환성 유지, 내부적으로 LLMService 사용)
         
         Args:
-            api_key (str): Google Gemini API 키
+            api_key (str): API 키 (무시됨 - LLMService가 환경 변수에서 자동 로드)
         """
-        if not GEMINI_AVAILABLE:
-            raise ImportError("google-generativeai 패키지가 설치되지 않았습니다. 'pip install google-generativeai'로 설치해주세요.")
-        
-        self.api_key = api_key
-        genai.configure(api_key=api_key)
-        
-        # Gemini 모델 초기화
-        try:
-            # gemini-1.5-flash 모델 사용 (무료 티어에서 안정적으로 작동)
-            self.model = genai.GenerativeModel('gemini-1.5-flash')
-            logger.info("Gemini 모델이 성공적으로 초기화되었습니다.")
-        except Exception as e:
-            logger.error(f"Gemini 모델 초기화 실패: {e}")
-            raise
+        if api_key:
+            logger.warning("GeminiService 초기화 시 api_key가 제공되었으나 무시됩니다. LLMService는 환경 변수에서 설정을 로드합니다.")
+        self.llm = get_llm_service()
+        logger.info(f"GeminiService 초기화 완료 (LLMService 위임: provider={self.llm.provider})")
     
     def load_prompt_template(self) -> str:
         """
@@ -72,38 +57,52 @@ class GeminiService:
             # 입력 데이터를 프롬프트에 삽입
             prompt = prompt_template.replace("{{input_data}}", input_text)
             
-            logger.info(f"Gemini API 호출 시작 - 입력 텍스트 길이: {len(input_text)}")
+            logger.info(f"LLM API 호출 시작 - 입력 텍스트 길이: {len(input_text)}")
             
-            # Gemini API 호출
-            response = self.model.generate_content(prompt)
-            
-            if not response.text:
-                raise ValueError("Gemini API에서 빈 응답을 받았습니다.")
-            
-            logger.info("Gemini API 응답 수신 완료")
-            logger.info(f"응답 내용 (처음 500자): {response.text[:500]}...")
-            
-            # JSON 응답 파싱 시도
+            # LLM API 호출 (JSON 응답)
             try:
-                # 마크다운 코드 블록 제거
-                text = response.text.strip()
-                if text.startswith('```json'):
-                    text = text[7:]  # ```json 제거
-                if text.endswith('```'):
-                    text = text[:-3]  # ``` 제거
-                
-                # JSON 파싱
-                result = json.loads(text.strip())
-                logger.info("JSON 파싱 성공")
+                result = self.llm.generate_json(
+                    prompt=prompt,
+                    system_prompt="You are a Korean language morphological analyzer. You MUST respond with valid JSON only.",
+                    temperature=0.1,
+                )
+                logger.info("LLM JSON 응답 파싱 성공")
                 return result
+            except Exception as e:
+                logger.warning(f"LLM JSON 응답 파싱 실패, 텍스트로 재시도: {e}")
                 
-            except json.JSONDecodeError as e:
-                logger.warning(f"JSON 파싱 실패: {e}")
-                logger.warning(f"응답 내용: {response.text}")
+                # JSON 파싱 실패 시 텍스트로 시도
+                text = self.llm.generate_text(
+                    prompt=prompt,
+                    system_prompt="You are a Korean language morphological analyzer. Respond with valid JSON only.",
+                    temperature=0.1,
+                )
                 
-                # JSON 파싱 실패 시 기본 결과 반환
-                logger.info("기본 형태소 분석 결과 반환")
-                return self._get_default_analysis_result(input_text)
+                if not text:
+                    raise ValueError("LLM에서 빈 응답을 받았습니다.")
+                
+                logger.info(f"LLM 응답 수신 완료")
+                logger.info(f"응답 내용 (처음 500자): {text[:500]}...")
+                
+                # JSON 파싱 시도
+                try:
+                    # 마크다운 코드 블록 제거
+                    cleaned = text.strip()
+                    if cleaned.startswith('```json'):
+                        cleaned = cleaned[7:]
+                    if cleaned.startswith('```'):
+                        cleaned = cleaned[3:]
+                    if cleaned.endswith('```'):
+                        cleaned = cleaned[:-3]
+                    
+                    result = json.loads(cleaned.strip())
+                    logger.info("JSON 파싱 성공")
+                    return result
+                    
+                except json.JSONDecodeError as e2:
+                    logger.warning(f"JSON 파싱 실패: {e2}")
+                    logger.info("기본 형태소 분석 결과 반환")
+                    return self._get_default_analysis_result(input_text)
                 
         except Exception as e:
             logger.error(f"문장 분석 중 오류 발생: {e}")
@@ -347,21 +346,24 @@ class GeminiService:
             template_with_data = video_prompt_template.replace("{{sentence_analysis}}", sentence_analysis)
             template_with_data = template_with_data.replace("{{sign_data}}", sign_data_str)
             
-            # Gemini AI에게 프롬프트 생성 요청
-            logger.info(f"🤖 Gemini AI에게 비디오 프롬프트 생성 요청: '{sentence[:30]}...'")
+            # LLMService를 사용하여 프롬프트 생성
+            logger.info(f"🤖 LLM에게 비디오 프롬프트 생성 요청: '{sentence[:30]}...'")
             
-            response = self.model.generate_content(template_with_data)
+            generated_prompt = self.llm.generate_text(
+                prompt=template_with_data,
+                system_prompt="You are an expert at creating detailed video generation prompts for Korean Sign Language videos.",
+                temperature=0.7,
+            )
             
-            if response and response.text:
-                generated_prompt = response.text.strip()
-                logger.info(f"✅ Gemini AI 프롬프트 생성 완료: {len(generated_prompt)}자")
+            if generated_prompt:
+                logger.info(f"✅ LLM 프롬프트 생성 완료: {len(generated_prompt)}자")
                 return generated_prompt
             else:
-                logger.warning("⚠️ Gemini AI 응답이 비어있음, 폴백 프롬프트 사용")
+                logger.warning("⚠️ LLM 응답이 비어있음, 폴백 프롬프트 사용")
                 return self._create_fallback_prompt(sentence, sign_data)
                 
         except Exception as e:
-            logger.error(f"❌ Gemini AI 프롬프트 생성 중 오류: {e}")
+            logger.error(f"❌ LLM 프롬프트 생성 중 오류: {e}")
             # 오류 발생 시 폴백 프롬프트 반환
             return self._create_fallback_prompt(sentence, sign_data)
     

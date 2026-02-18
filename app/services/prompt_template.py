@@ -136,31 +136,28 @@ class PromptTemplateManager:
             template_with_data = video_prompt_template.replace("{{sentence_analysis}}", sentence_analysis)
             template_with_data = template_with_data.replace("{{sign_data}}", sign_data_str)
             
-            # Gemini AI가 설정되어 있는 경우 AI로 프롬프트 생성
+            # LLMService를 사용하여 프롬프트 생성
             try:
-                from .gemini_service import GeminiService
-                import os
+                from .llm_service import get_llm_service
                 
-                api_key = os.getenv('GEMINI_API_KEY') or os.getenv('GOOGLE_API_KEY')
-                if api_key:
-                    gemini_service = GeminiService(api_key)
-                    
-                    logger.info(f"🤖 Gemini AI에게 비디오 프롬프트 생성 요청: '{sentence[:30]}...'")
-                    response = gemini_service.model.generate_content(template_with_data)
-                    
-                    if response and response.text:
-                        generated_prompt = response.text.strip()
-                        logger.info(f"✅ Gemini AI 프롬프트 생성 완료: {len(generated_prompt)}자")
-                        return generated_prompt
-                    else:
-                        logger.warning("⚠️ Gemini AI 응답이 비어있음, 폴백 프롬프트 사용")
-                        return self._create_fallback_prompt(sentence, sign_data)
+                llm = get_llm_service()
+                
+                logger.info(f"🤖 LLM에게 비디오 프롬프트 생성 요청: '{sentence[:30]}...'")
+                generated_prompt = llm.generate_text(
+                    prompt=template_with_data,
+                    system_prompt="You are an expert at creating detailed video generation prompts for Korean Sign Language videos.",
+                    temperature=0.7,
+                )
+                
+                if generated_prompt:
+                    logger.info(f"✅ LLM 프롬프트 생성 완료: {len(generated_prompt)}자")
+                    return generated_prompt
                 else:
-                    logger.warning("⚠️ Gemini API 키가 없어서 폴백 프롬프트 사용")
+                    logger.warning("⚠️ LLM 응답이 비어있음, 폴백 프롬프트 사용")
                     return self._create_fallback_prompt(sentence, sign_data)
                     
             except Exception as e:
-                logger.error(f"❌ Gemini AI 프롬프트 생성 중 오류: {e}")
+                logger.error(f"❌ LLM 프롬프트 생성 중 오류: {e}")
                 return self._create_fallback_prompt(sentence, sign_data)
                 
         except Exception as e:
