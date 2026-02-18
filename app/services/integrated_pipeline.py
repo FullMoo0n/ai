@@ -76,7 +76,40 @@ class IntegratedPipeline:
         try:
             self.pipeline_status = "processing"
             logger.info(f"파이프라인 시작: {self.task_id}")
-            
+
+            # TODO: [DEPLOY] 배포용 Mock 처리. 실제 서비스 재개시 아래 Mock 리턴을 제거하세요.
+            # Azure Blob Storage URL이 들어오면 바로 Mock 리턴
+            if s3_image_url:
+                logger.info(f"🔄 [DEPLOY] 배포용 Mock 모드 동작: {s3_image_url}")
+                mock_video_url = "https://stdevbinary.blob.core.windows.net/blob-binary/KSL_Video_Generation_Request.mp4"
+                
+                # 가짜 비디오 결과 생성
+                mock_video_result = {
+                    'full_text': "Mocked Text",
+                    'video_url': mock_video_url,
+                    'video_prompt': "Mocked Prompt",
+                    'status': 'completed',
+                    'veo_response': {'status': 'mock', 'video_url': mock_video_url},
+                    'note': 'Deployment Mock',
+                    'integrated_data': {}
+                }
+                
+                # 가짜 최종 결과 생성
+                final_result = {
+                    'task_id': self.task_id,
+                    'status': 'completed',
+                    'video_urls': [mock_video_url],
+                    'total_videos': 1,
+                    'successful_videos': 1,
+                    'failed_videos': 0,
+                    'completed_at': datetime.now().isoformat(),
+                    'video_details': [mock_video_result]
+                }
+                
+                self.pipeline_status = "completed"
+                self.final_result = final_result
+                return final_result
+
             # 1. OCR 텍스트 추출
             extracted_text = await self._step_ocr(s3_image_url)
             

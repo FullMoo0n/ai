@@ -8,7 +8,7 @@ from .s3_utils import (
     S3AccessError
 )
 from .vision_ocr import (
-    build_payload,
+    # build_payload,  # Base64 방식 미사용 - 아래 build_payload_for_url 사용
     call_vision_api,
     extract_full_text,
     extract_word_boxes,
@@ -104,7 +104,7 @@ async def process_s3_image_with_vision(
         if language_hints is None:
             language_hints = ["ko"]
             
-        # URL 기반 페이로드 생성 (기존 build_payload 함수 수정 필요)
+        # URL 기반 페이로드 생성 (Base64 build_payload 대신 URL 방식 사용)
         payload = build_payload_for_url(public_url, feature=feature, language_hints=language_hints)
         
         # 5. Vision API 호출
