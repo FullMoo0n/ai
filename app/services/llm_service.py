@@ -32,7 +32,19 @@ class LLMService:
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
     ):
-        self.provider = provider or os.getenv("LLM_PROVIDER", "ollama")
+        # 1. 명시적 provider 인자가 있으면 최우선
+        # 2. LLM_PROVIDER 환경변수가 있으면 그 다음
+        # 3. ENVIRONMENT 환경변수에 따라 기본값 설정 (production -> openai, 그외 -> ollama)
+        if provider:
+            self.provider = provider
+        else:
+            env_provider = os.getenv("LLM_PROVIDER")
+            if env_provider:
+                self.provider = env_provider
+            else:
+                # ENVIRONMENT 체크 (기본값 dev)
+                environment = os.getenv("ENVIRONMENT", "dev").lower()
+                self.provider = "openai" if environment == "production" else "ollama"
 
         if self.provider == "ollama":
             self.base_url = base_url or os.getenv(

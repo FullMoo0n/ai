@@ -200,6 +200,41 @@ def test_error_handling_invalid_json():
         print(f"⏭️  LLM 서비스를 사용할 수 없어 스킵: {e}")
 
 
+
+def test_llm_service_environment_variable():
+    """ENVIRONMENT 환경변수에 따른 provider 선택 테스트"""
+    # 백업
+    original_env = os.environ.get("ENVIRONMENT")
+    original_provider = os.environ.get("LLM_PROVIDER")
+    
+    try:
+        # LLM_PROVIDER가 설정되어 있으면 그것이 우선하므로 제거
+        if "LLM_PROVIDER" in os.environ:
+            del os.environ["LLM_PROVIDER"]
+            
+        # 1. Production -> OpenAI
+        os.environ["ENVIRONMENT"] = "production"
+        service_prod = LLMService()
+        assert service_prod.provider == "openai"
+        print("✅ Environment=production -> OpenAI 선택 성공")
+        
+        # 2. Dev -> Ollama
+        os.environ["ENVIRONMENT"] = "dev"
+        service_dev = LLMService()
+        assert service_dev.provider == "ollama"
+        print("✅ Environment=dev -> Ollama 선택 성공")
+        
+    finally:
+        # 복구
+        if original_env:
+            os.environ["ENVIRONMENT"] = original_env
+        else:
+            if "ENVIRONMENT" in os.environ:
+                del os.environ["ENVIRONMENT"]
+                
+        if original_provider:
+            os.environ["LLM_PROVIDER"] = original_provider
+
 if __name__ == "__main__":
     print("=" * 60)
     print("LLMService 통합 테스트 시작")
@@ -210,6 +245,7 @@ if __name__ == "__main__":
     test_llm_service_invalid_provider()
     test_ollama_base_url_validation_localhost()
     test_singleton_pattern()
+    test_llm_service_environment_variable()
     
     # OpenAI 테스트 (API 키가 있는 경우에만)
     try:

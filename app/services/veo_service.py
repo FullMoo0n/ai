@@ -178,42 +178,53 @@ class VeoService:
                 - created_at: 생성 시간
                 - note: 추가 정보
         """
-        try:
-            logger.info(f"🎬 Veo3 수어 비디오 생성 시작: {task_id or 'unknown'}")
-            logger.info(f"📝 프롬프트 길이: {len(prompt)}자")
-            logger.info(f"📐 화면 비율: {aspect_ratio}")
+        # TODO: [DEPLOY] 배포용 Mock 처리. 실제 서비스 재개시 아래 Mock 리턴을 제거하고 주석 처리된 코드를 복구하세요.
+        # mock 지우기
+        return {
+            'status': 'success',
+            'video_url': 'https://stdevbinary.blob.core.windows.net/blob-binary/KSL_Video_Generation_Request.mp4',
+            'prompt': prompt,
+            'task_id': task_id,
+            'created_at': datetime.now().isoformat(),
+            'note': 'Veo3 Mock Video (Deployment)'
+        }
+
+        # try:
+        #     logger.info(f"🎬 Veo3 수어 비디오 생성 시작: {task_id or 'unknown'}")
+        #     logger.info(f"📝 프롬프트 길이: {len(prompt)}자")
+        #     logger.info(f"📐 화면 비율: {aspect_ratio}")
             
-            # 로컬 이미지 파일 사용 (CHARACTER_IMG 환경변수는 더 이상 사용하지 않음)
+        #     # 로컬 이미지 파일 사용 (CHARACTER_IMG 환경변수는 더 이상 사용하지 않음)
             
-            # Veo3 API 호출 시도
-            try:
-                video_result = await self._call_veo3_api(
-                    prompt, aspect_ratio, task_id, image_gcs_uri, output_gcs_uri
-                )
-                if video_result and video_result.get('status') == 'success':
-                    logger.info(f"✅ Veo3 API 호출 성공: {task_id or 'unknown'}")
+        #     # Veo3 API 호출 시도
+        #     try:
+        #         video_result = await self._call_veo3_api(
+        #             prompt, aspect_ratio, task_id, image_gcs_uri, output_gcs_uri
+        #         )
+        #         if video_result and video_result.get('status') == 'success':
+        #             logger.info(f"✅ Veo3 API 호출 성공: {task_id or 'unknown'}")
                     
-                    # Google API URI를 S3에 업로드
-                    original_url = video_result.get('video_url')
-                    if original_url and original_url.startswith('https://generativelanguage.googleapis.com'):
-                        logger.info(f"📤 Google API URI를 S3에 업로드 중: {task_id or 'unknown'}")
-                        s3_url = await self.upload_video_to_s3(original_url, task_id or 'unknown')
-                        video_result['video_url'] = s3_url  # S3 URL로 교체
-                        video_result['original_google_uri'] = original_url  # 원본 URI 보존
-                        logger.info(f"✅ S3 업로드 완료, URL 업데이트: {s3_url}")
+        #             # Google API URI를 S3에 업로드
+        #             original_url = video_result.get('video_url')
+        #             if original_url and original_url.startswith('https://generativelanguage.googleapis.com'):
+        #                 logger.info(f"📤 Google API URI를 S3에 업로드 중: {task_id or 'unknown'}")
+        #                 s3_url = await self.upload_video_to_s3(original_url, task_id or 'unknown')
+        #                 video_result['video_url'] = s3_url  # S3 URL로 교체
+        #                 video_result['original_google_uri'] = original_url  # 원본 URI 보존
+        #                 logger.info(f"✅ S3 업로드 완료, URL 업데이트: {s3_url}")
                     
-                    return video_result
-                else:
-                    logger.warning(f"⚠️ Veo3 API 응답이 예상과 다름: {video_result}")
-                    return self._create_mock_result(prompt, task_id, "Veo3 API 응답이 예상과 다름")
+        #             return video_result
+        #         else:
+        #             logger.warning(f"⚠️ Veo3 API 응답이 예상과 다름: {video_result}")
+        #             return self._create_mock_result(prompt, task_id, "Veo3 API 응답이 예상과 다름")
                     
-            except Exception as e:
-                logger.error(f"❌ Veo3 API 호출 실패: {str(e)}")
-                return self._create_mock_result(prompt, task_id, f"Veo3 API 오류: {str(e)}")
+        #     except Exception as e:
+        #         logger.error(f"❌ Veo3 API 호출 실패: {str(e)}")
+        #         return self._create_mock_result(prompt, task_id, f"Veo3 API 오류: {str(e)}")
                 
-        except Exception as e:
-            logger.error(f"❌ 수어 비디오 생성 중 예상치 못한 오류: {str(e)}")
-            return self._create_mock_result(prompt, task_id, f"예상치 못한 오류: {str(e)}")
+        # except Exception as e:
+        #     logger.error(f"❌ 수어 비디오 생성 중 예상치 못한 오류: {str(e)}")
+        #     return self._create_mock_result(prompt, task_id, f"예상치 못한 오류: {str(e)}")
     
     async def _call_veo3_api(
         self, 

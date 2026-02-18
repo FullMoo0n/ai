@@ -65,8 +65,8 @@ coverage.xml
 .hypothesis/
 
 # ---- Test Files (프로젝트 특정) ----
-test_*.py
-*_test.py
+# test_*.py
+# *_test.py
 
 # ---- Build / Dist ----
 build/
