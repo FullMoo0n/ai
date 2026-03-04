@@ -34,7 +34,11 @@ async def process_s3_image_with_vision(
         include_word_boxes: (호환성 유지용 - OpenAI는 단어 박스를 제공하지 않으므로 무시됨)
 
     Returns:
-        Dict: OCR 처리 결과 {"success": bool, "text": str, "public_url": str}
+        Dict: OCR 처리 결과
+            - success: 처리 성공 여부
+            - text: OCR 추출 텍스트
+            - image_context: 이미지 시각 맥락 요약(인물/배경/조명)
+            - public_url: 실제 Vision 호출에 사용된 URL
     """
     try:
         api_key = os.getenv("OPENAI_API_KEY")
@@ -97,9 +101,39 @@ async def process_s3_image_with_vision(
                     lines = lines[:-1]
                 extracted_text = "\n".join(lines).strip()
 
+        image_context = ""
+        try:
+            context_prompt = (
+                "이 이미지를 기반으로 영상 생성에 바로 사용할 수 있도록, "
+                "다음 요소만 1~3문장으로 요약해줘: "
+                "(1) 주체/인물 외형, (2) 배경/공간, (3) 조명/색감. "
+                "텍스트를 읽거나 번역하지 말고 시각 정보만 설명해."
+            )
+            context_response = await client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": context_prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": public_url, "detail": "high"},
+                            },
+                        ],
+                    }
+                ],
+                max_tokens=300,
+            )
+            image_context = (context_response.choices[0].message.content or "").strip()
+            logger.info("OpenAI 이미지 맥락 요약 완료")
+        except Exception as context_error:
+            logger.warning(f"이미지 맥락 요약 실패 (OCR은 계속 진행): {context_error}")
+
         result = {
             "success": True,
             "text": extracted_text,
+            "image_context": image_context,
             "s3_url": s3_url,  # (호환성 유지용 키)
             "image_url": s3_url,
             "public_url": public_url,

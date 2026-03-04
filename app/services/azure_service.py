@@ -5,7 +5,12 @@ import io
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
 
-from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions
+from azure.storage.blob import (
+    BlobServiceClient,
+    generate_blob_sas,
+    BlobSasPermissions,
+    ContentSettings,
+)
 from azure.core.exceptions import ResourceNotFoundError
 
 logger = logging.getLogger(__name__)
@@ -167,7 +172,7 @@ async def upload_stream_to_azure(
             data,
             blob_type="BlockBlob",
             overwrite=True,
-            content_settings={"content_type": content_type},
+            content_settings=ContentSettings(content_type=content_type),
         )
 
         # public 접근이 가능한 컨테이너를 가정하고 기본 URL 반환

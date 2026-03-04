@@ -4,9 +4,13 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from openai import OpenAI
 import logging
+import threading
+from dotenv import load_dotenv
 
 # 로거 초기화
 logger = logging.getLogger(__name__)
+
+load_dotenv()
 
 # 기본 유사도 임계값
 DEFAULT_SCORE_THRESHOLD = 0.7
@@ -23,6 +27,11 @@ class SignDataService:
         self.score_threshold = score_threshold or float(
             os.getenv("QDRANT_SCORE_THRESHOLD", DEFAULT_SCORE_THRESHOLD)
         )
+        self.auto_ingest_on_access = os.getenv(
+            "AUTO_INGEST_SIGN_DATA_ON_QDRANT_ACCESS", "true"
+        ).strip().lower() in {"1", "true", "yes", "y", "on"}
+        self._ingest_checked = False
+        self._ingest_lock = threading.Lock()
 
         # Qdrant Client 초기화 (fail-fast)
         try:
@@ -40,6 +49,56 @@ class SignDataService:
                 "OPENAI_API_KEY 환경변수가 설정되지 않았습니다. 임베딩 검색을 사용할 수 없습니다."
             )
         self.openai_client = OpenAI(api_key=self.openai_api_key)
+
+    def _get_collection_count(self) -> int:
+        """sign_languages 컬렉션 포인트 개수 조회 (없거나 오류 시 0)"""
+        try:
+            collections = self.client.get_collections().collections
+            exists = any(c.name == self.collection_name for c in collections)
+            if not exists:
+                return 0
+            return int(
+                self.client.count(
+                    collection_name=self.collection_name,
+                    exact=True,
+                ).count
+            )
+        except Exception as e:
+            logger.warning(f"Qdrant 컬렉션 카운트 조회 실패: {e}")
+            return 0
+
+    def _ensure_collection_populated_if_needed(self) -> None:
+        """Qdrant 접근 시점에 컬렉션이 비어 있으면 CSV 자동 적재"""
+        if self._ingest_checked:
+            return
+
+        if not self.auto_ingest_on_access:
+            self._ingest_checked = True
+            return
+
+        with self._ingest_lock:
+            if self._ingest_checked:
+                return
+
+            existing_count = self._get_collection_count()
+            if existing_count > 0:
+                logger.info(
+                    f"Qdrant 기존 데이터 감지: {existing_count}건 (자동 적재 생략)"
+                )
+                self._ingest_checked = True
+                return
+
+            logger.info("Qdrant 데이터 없음 → 접근 시점 자동 적재 시작")
+            try:
+                from scripts.ingest_sign_data import ingest_data
+
+                ingest_data(recreate_collection=False)
+                ingested_count = self._get_collection_count()
+                logger.info(f"Qdrant 접근 시점 자동 적재 완료: {ingested_count}건")
+            except Exception as e:
+                logger.error(f"Qdrant 접근 시점 자동 적재 실패: {e}")
+            finally:
+                self._ingest_checked = True
 
     def _get_embedding(self, text: str) -> List[float]:
         """텍스트를 임베딩 벡터로 변환
@@ -71,6 +130,9 @@ class SignDataService:
         Raises:
             RuntimeError: 임베딩 생성 또는 Qdrant 검색 실패 시
         """
+        # 첫 Qdrant 접근 시점에만 데이터 유무 확인 및 자동 적재
+        self._ensure_collection_populated_if_needed()
+
         # 1. 키워드 임베딩
         query_vector = self._get_embedding(keyword)
 

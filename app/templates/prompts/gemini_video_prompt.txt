@@ -1,87 +1,43 @@
-### **Prompt for Gemini Video Generation**
+### **Prompt for Gemini Video Generation (Sora 2 Format)**
 
 **[Objective]**
-Create a comprehensive video generation prompt for Korean Sign Language (KSL) videos based on the provided sentence analysis and sign language data.
+Create a comprehensive video generation prompt for Korean Sign Language (KSL) videos based on the provided sentence analysis and sign language data. The output must STRICTLY follow the OpenAI Sora 2 prompt structure.
 
 **[Input Data]**
 - **Sentence Analysis**: {{sentence_analysis}}
 - **Sign Language Data**: {{sign_data}}
+- **Image Context**: {{image_context}}
+- **Reference Image URL**: {{reference_image_url}}
 
-**[Procedure and Rules]**
+**[Output Format Requirements (Sora 2)]**
+You must output ONLY the generated prompt following this EXACT structure, without any markdown code blocks, prefixes, or conversational text. Use English for the prompt.
 
-1. **Prompt Structure**: Create a detailed video generation prompt that includes:
-   - Clear video requirements (duration, aspect ratio, lighting)
-   - Specific sign language instructions
-   - Facial expression and body language guidance
-   - Technical specifications for video quality
-   - Figure image reference for consistent appearance
-   - **Explicit exclusion commands to prevent unwanted elements like text.**
+[Prose description of the scene: Describe the character from the provided reference image, their clothing, the background, and lighting/weather. Reflect the Image Context details explicitly and consistently.]
 
-2. **Sign Language Integration**: 
-   - Include ONLY the sign language data that was successfully retrieved from the Culture API
-   - For each word with sign data, provide the specific sign description
-   - Do NOT include generic descriptions for words without sign data
-   - Focus on accuracy and cultural authenticity
+Camera and Style:
+- Shot: [e.g., Medium close-up, eye-level, focused on the upper body and hands]
+- Vibe: [e.g., Cinematic, professional, clear and well-lit studio environment]
 
-3. **Video Requirements**:
-   - Duration: 5-8 seconds
-   - Aspect ratio: 16:9
-   - Lighting: Bright and clear for hand visibility
-   - Figure appearance: Based on provided reference image
+Action:
+- [Action 1: The character begins performing Korean Sign Language fluidly and naturally.]
+- [Action 2: Describe the specific hand movements and facial expressions based on the sign data provided. If data is provided, describe the exact gestures. If not, describe them creatively signing the story.]
+- [Action 3: Ensure the character maintains eye contact and transitions smoothly between signs without any text or subtitles appearing anywhere.]
 
-4. **Sign Language Guidelines**:
-   - Natural and fluent signing movements
-   - Clear hand gestures and facial expressions
-   - Appropriate emotional expression matching the sentence content
-   - Consistent signing speed throughout the video
-   - Smooth transitions between signs
-   - TEXTLESS GUARANTEE: Do not generate any kind of text anywhere in the frames. This includes subtitles, closed captions (CC), title cards, lower‑thirds, labels, banners, credits, lyrics, SRT/VTT, speech bubbles, UI, logos, watermarks, signage, book/page text, numbers, or letters in any language (Hangul/English/Japanese/etc.).
+Dialogue:
+- Character: "[The translated English or original Korean sentence they are signing]"
 
-**[Output Format]**
-Generate a comprehensive, detailed prompt that can be directly used by Veo3 video generation API. The prompt should be in English and include all necessary details for creating a high-quality Korean Sign Language video with figure consistency.
+Ambient Sound: [e.g., Quiet room tone, faint studio hum]
 
-**[Example Structure]**
-The figure from the provided reference image performing Korean Sign Language (KSL). A clean, studio shot focusing purely on the visual performance of sign language.
+Reference Image:
+- URL: [Reference Image URL]
+- Visual Context: [One-line summary using the provided Image Context]
 
-Video Requirements:
-- Show the figure from the reference image
-- Consistency in the figure's appearance and sign language must be maintained for the full duration of the video.
-- The figure's hands and fingers should follow the sign language movements precisely
-- Clear, natural hand movements and facial expressions matching the figure's appearance
-- Appropriate facial expressions that match the content and tone of the sentence
-- Duration: 5-8 seconds
-- Good lighting with clear visibility of hands and face
+**[Important Guidelines]**
+1. **Never include text or subtitles**: The video must be purely visual. Do not include any subtitles, captions, or typography. 
+2. **Sign Language Accuracy**: Use the provided Sign Language Data to describe the actions in the Action section.
+3. **Consistency**: The character must maintain the exact same appearance throughout the clip. Action should be continuous.
+4. **Duration**: Design the action to fit within an 8-second timeframe.
+5. **Image Grounding**: You must include and preserve the provided Image Context in scene description, style, and action details.
 
-Sign Language Details:
-[Include only actual sign data from Culture API]
-
-Key Instructions:
-- The figure should appear natural and fluent in their signing
-- Hand movements should be clear and precise
-- Facial expressions should convey the meaning appropriately
-- Maintain consistent signing speed throughout
-- Ensure smooth transitions between signs
-- The figure should maintain appropriate eye contact with the camera
-- The video must be purely visual, focusing solely on the figure's sign language performance.
-- From start to finish, the figure must continuously and consistently perform the same sign language throughout the entire video.
-
-Critical Exclusions (VERY IMPORTANT):
-- ABSOLUTELY NO on-screen text, subtitles, captions, or written words of any kind.
-- NO graphic overlays, logos, or watermarks.
-- Only the specified background, figure, and their movements should be present. No other objects or elements.
-- The video must not contain any other people.
-
-Additional Context:
-Please create a video of the figure communicating a story using only Korean Sign Language.
-
-**[Important Notes]**
-- Use ONLY the sign language data provided
-- Do NOT invent or guess sign descriptions
-- Focus on creating a prompt that will result in a high-quality, authentic KSL video
-- Ensure the prompt is specific enough for Veo3 to generate appropriate content
-- The figure should maintain consistency with the reference image provided
-- Generate signing actions based on the following condition: If specific Korean Sign Language data is not provided, the model should creatively generate interpretive gestures to convey the story. Conversely, if accurate sign language data is available, the model must exclusively use that data for the signing movements.
-- **Always include the TEXTLESS GUARANTEE line at the top and the Negative prompt block at the end.**
-
-**[Negative Prompt]**
-text, subtitles, captions, letters, numbers, Hangul, logos, watermarks, graphic overlays, UI elements. Blurry, low-resolution, jerky motion, unnatural movements, inconsistent speed, poor lighting, harsh shadows, cluttered background, other people, other objects, distracting elements.
+**[Output Prompt to Generate]**
+(Start your response exactly from the Prose description line below)

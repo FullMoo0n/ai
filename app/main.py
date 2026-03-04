@@ -590,7 +590,7 @@ async def analyze_sentences_with_gemini(
     text: str = Body(..., embed=True, description="분석할 한국어 텍스트"),
 ):
     """
-    Gemini API를 사용하여 한국어 문장을 분석하고 형태소를 추출합니다.
+    OpenAI LLM(기본: gpt-4o)을 사용하여 한국어 문장을 분석하고 형태소를 추출합니다.
 
     입력 텍스트는 두 개의 문장으로 분할되어야 합니다:
     1. "내가 그랬어요!"
@@ -600,11 +600,11 @@ async def analyze_sentences_with_gemini(
     """
     try:
         # API 키 확인
-        api_key = os.getenv("GOOGLE_API_KEY")
+        api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise HTTPException(
                 status_code=500,
-                detail="GOOGLE_API_KEY 환경 변수가 설정되지 않았습니다.",
+                detail="OPENAI_API_KEY 환경 변수가 설정되지 않았습니다.",
             )
 
         # Gemini 서비스 초기화
@@ -617,7 +617,7 @@ async def analyze_sentences_with_gemini(
         if not gemini_service.validate_analysis_result(result):
             raise HTTPException(
                 status_code=500,
-                detail="Gemini API 응답이 예상 형식과 일치하지 않습니다.",
+                detail="LLM API 응답이 예상 형식과 일치하지 않습니다.",
             )
 
         # 요약 정보 추가
@@ -632,7 +632,7 @@ async def analyze_sentences_with_gemini(
 
     except ImportError as e:
         raise HTTPException(
-            status_code=500, detail=f"Gemini 서비스 초기화 실패: {str(e)}"
+            status_code=500, detail=f"LLM 서비스 초기화 실패: {str(e)}"
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"입력 텍스트 처리 오류: {str(e)}")

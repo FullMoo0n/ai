@@ -44,6 +44,8 @@ class SyncIntegratedPipeline:
         self.current_step = None
         self.pipeline_status = "initialized"
         self.final_result = None
+        self.source_image_url = ""
+        self.image_context = ""
 
         # 파이프라인 단계들 초기화
         self._initialize_steps()
@@ -74,6 +76,7 @@ class SyncIntegratedPipeline:
         """
         try:
             self.pipeline_status = "processing"
+            self.source_image_url = s3_image_url
             logger.info(f"동기 방식 파이프라인 시작: {self.task_id}")
 
             # 1. OCR 텍스트 추출
@@ -124,6 +127,7 @@ class SyncIntegratedPipeline:
                 )
 
             extracted_text = result.get("text", "")
+            self.image_context = result.get("image_context", "")
 
             if not extracted_text.strip():
                 raise SyncPipelineError("이미지에서 텍스트를 추출할 수 없습니다")
@@ -133,6 +137,10 @@ class SyncIntegratedPipeline:
             step.completed_at = datetime.now()
 
             logger.info(f"OCR 완료: {self.task_id}, 텍스트 길이: {len(extracted_text)}")
+            if self.image_context:
+                logger.info(
+                    f"🖼️ 이미지 맥락 요약 길이: {len(self.image_context)}"
+                )
             return extracted_text
 
         except Exception as e:
@@ -226,7 +234,12 @@ class SyncIntegratedPipeline:
 
             # 전체 텍스트에 대한 프롬프트 생성 (Gemini AI 사용)
             prompt_manager = get_default_prompt_manager()
-            video_prompt = prompt_manager.generate_video_prompt(text, sign_data)
+            video_prompt = prompt_manager.generate_video_prompt(
+                text,
+                sign_data,
+                image_context=self.image_context,
+                reference_image_url=self.source_image_url,
+            )
 
             logger.info(f"📝 생성된 프롬프트 길이: {len(video_prompt)}자")
             logger.info(f"🔍 프롬프트 내용 (처음 200자): '{video_prompt[:200]}...'")
@@ -236,6 +249,8 @@ class SyncIntegratedPipeline:
                 "text": text,
                 "tokens": tokens,
                 "sign_data": sign_data,
+                "image_context": self.image_context,
+                "source_image_url": self.source_image_url,
                 "video_prompt": video_prompt,
             }
 
@@ -268,6 +283,7 @@ class SyncIntegratedPipeline:
 
             text = prompt_result["text"]
             video_prompt = prompt_result["video_prompt"]
+            source_image_url = prompt_result.get("source_image_url", "")
 
             logger.info(f"🎥 단일 비디오 생성 시작")
             logger.info(f"  📝 텍스트: '{text}'")
@@ -280,7 +296,11 @@ class SyncIntegratedPipeline:
 
                 try:
                     video_result_data = asyncio.run(
-                        generate_sign_video(prompt=video_prompt, task_id=self.task_id)
+                        generate_sign_video(
+                            prompt=video_prompt,
+                            task_id=self.task_id,
+                            reference_image_url=source_image_url,
+                        )
                     )
                 except RuntimeError:
                     # 진행 중인 루프가 있다면 nest_asyncio 적용 시도
@@ -289,7 +309,11 @@ class SyncIntegratedPipeline:
                     nest_asyncio.apply()
                     loop = asyncio.get_event_loop()
                     video_result_data = loop.run_until_complete(
-                        generate_sign_video(prompt=video_prompt, task_id=self.task_id)
+                        generate_sign_video(
+                            prompt=video_prompt,
+                            task_id=self.task_id,
+                            reference_image_url=source_image_url,
+                        )
                     )
 
                 if video_result_data and video_result_data.get("status") == "success":
@@ -297,6 +321,7 @@ class SyncIntegratedPipeline:
                         "text": text,
                         "video_url": video_result_data["video_url"],
                         "video_prompt": video_prompt,
+                        "source_image_url": source_image_url,
                         "status": "completed",
                         "sora_response": video_result_data,
                         "created_at": datetime.now().isoformat(),
@@ -311,6 +336,7 @@ class SyncIntegratedPipeline:
                         "text": text,
                         "video_url": None,
                         "video_prompt": video_prompt,
+                        "source_image_url": source_image_url,
                         "status": "failed",
                         "error": "Sora API 응답 실패",
                         "sora_response": video_result_data,
@@ -323,6 +349,7 @@ class SyncIntegratedPipeline:
                     "text": text,
                     "video_url": None,
                     "video_prompt": video_prompt,
+                    "source_image_url": source_image_url,
                     "status": "failed",
                     "error": str(api_error),
                     "created_at": datetime.now().isoformat(),

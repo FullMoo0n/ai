@@ -82,11 +82,13 @@ cp .env.example .env
 - `VEO_API_KEY`: Google Veo3 API 키 (비디오 생성용)
 - `VEO_MODEL`: Veo3 모델명 (기본: veo-3.0-generate-preview)
 - `VEO_OUTPUT_GCS_URI`: 출력 비디오 GCS URI (예: gs://your-bucket/your-prefix)
-- `LLM_PROVIDER`: LLM 제공자 (`ollama` 또는 `openai`, 기본: `ollama`)
+- `LLM_PROVIDER`: LLM 제공자 (`ollama` 또는 `openai`, 기본: `openai`)
+- `OPENAI_MODEL`: OpenAI 모델명 (기본: `gpt-4o`)
 - `OLLAMA_BASE_URL`: Ollama API 주소 (기본: `http://localhost:11434/v1`)
 - `OLLAMA_MODEL`: Ollama 모델명 (기본: `qwen2.5:7b-instruct-q4_K_M`)
-- `OPENAI_API_KEY`: OpenAI API 키 (LLM_PROVIDER=openai 사용 시 또는 문장 검증용)
+- `OPENAI_API_KEY`: OpenAI API 키 (기본 LLM 동작 및 문장 검증용)
 - `REDIS_URL`: Redis 연결 URL (기본: redis://localhost:6379/0)
+- `AUTO_INGEST_SIGN_DATA_ON_QDRANT_ACCESS`: Qdrant 조회 시 데이터가 비어 있으면 CSV 자동 적재 (`true`/`false`, 기본: `true`)
 
 S3 업로드를 위한 환경 변수:
 - `AWS_ACCESS_KEY_ID`: AWS 액세스 키 ID

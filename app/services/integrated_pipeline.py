@@ -51,6 +51,8 @@ class IntegratedPipeline:
         self.current_step = None
         self.pipeline_status = "initialized"
         self.final_result = None
+        self.source_image_url = ""
+        self.image_context = ""
 
         # 파이프라인 단계들 초기화
         self._initialize_steps()
@@ -79,6 +81,7 @@ class IntegratedPipeline:
         """
         try:
             self.pipeline_status = "processing"
+            self.source_image_url = s3_image_url
             logger.info(f"파이프라인 시작: {self.task_id}")
 
             # 1. OCR 텍스트 추출
@@ -125,6 +128,7 @@ class IntegratedPipeline:
             )
 
             extracted_text = result.get("text", "")
+            self.image_context = result.get("image_context", "")
 
             if not extracted_text.strip():
                 raise PipelineError("이미지에서 텍스트를 추출할 수 없습니다")
@@ -134,6 +138,10 @@ class IntegratedPipeline:
             step.completed_at = datetime.now()
 
             logger.info(f"OCR 완료: {self.task_id}, 텍스트 길이: {len(extracted_text)}")
+            if self.image_context:
+                logger.info(
+                    f"🖼️ 이미지 맥락 요약 길이: {len(self.image_context)}"
+                )
             return extracted_text
 
         except Exception as e:
@@ -269,7 +277,12 @@ class IntegratedPipeline:
             # 통합 프롬프트 생성
             full_text = " ".join(all_sentences)
             prompt_manager = get_default_prompt_manager()
-            video_prompt = prompt_manager.generate_video_prompt(full_text, sign_data)
+            video_prompt = prompt_manager.generate_video_prompt(
+                full_text,
+                sign_data,
+                image_context=self.image_context,
+                reference_image_url=self.source_image_url,
+            )
             logger.info(f"📝 통합 프롬프트 생성 완료: {len(video_prompt)}자")
 
             # 결과 구조 (단일 결과로 변경)
@@ -279,6 +292,8 @@ class IntegratedPipeline:
                 "total_tokens": all_tokens,
                 "unique_tokens": unique_tokens,
                 "sign_data": sign_data,  # 실제 API 데이터만 포함
+                "image_context": self.image_context,
+                "source_image_url": self.source_image_url,
                 "video_prompt": video_prompt,
                 "api_stats": {
                     "total_unique_tokens": len(unique_tokens),
@@ -325,13 +340,16 @@ class IntegratedPipeline:
             # 통합 프롬프트로 단일 비디오 생성
             full_text = integrated_result.get("full_text", "")
             video_prompt = integrated_result.get("video_prompt", "")
+            source_image_url = integrated_result.get("source_image_url", "")
 
             try:
                 # Sora API 호출
                 from .sora_service import generate_sign_video
 
                 video_result_data = await generate_sign_video(
-                    prompt=video_prompt, task_id=self.task_id
+                    prompt=video_prompt,
+                    task_id=self.task_id,
+                    reference_image_url=source_image_url,
                 )
 
                 if video_result_data and video_result_data.get("status") == "success":
@@ -339,6 +357,7 @@ class IntegratedPipeline:
                         "full_text": full_text,
                         "video_url": video_result_data["video_url"],
                         "video_prompt": video_prompt,
+                        "source_image_url": source_image_url,
                         "status": "completed",
                         "sora_response": video_result_data,
                         "note": video_result_data.get("note", ""),
@@ -357,6 +376,7 @@ class IntegratedPipeline:
                         "full_text": full_text,
                         "video_url": None,
                         "video_prompt": video_prompt,
+                        "source_image_url": source_image_url,
                         "status": "failed",
                         "sora_response": video_result_data,
                         "note": "Sora API 응답이 예상과 다름",
@@ -370,6 +390,7 @@ class IntegratedPipeline:
                     "full_text": full_text,
                     "video_url": None,
                     "video_prompt": video_prompt,
+                    "source_image_url": source_image_url,
                     "status": "failed",
                     "sora_response": None,
                     "note": f"오류: {str(e)}",

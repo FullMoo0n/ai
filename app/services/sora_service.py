@@ -11,8 +11,10 @@ import asyncio
 import httpx
 from typing import Optional, Dict, Any
 from datetime import datetime
+from io import BytesIO
 
-from openai import OpenAI
+from openai import AsyncOpenAI
+from PIL import Image
 from app.services.azure_service import upload_stream_to_azure
 
 logger = logging.getLogger(__name__)
@@ -41,11 +43,16 @@ class SoraService:
         if not self.api_key:
             raise SoraAPIKeyError("OPENAI_API_KEY 환경변수가 설정되지 않았습니다.")
 
-        self.client = OpenAI(api_key=self.api_key)
-        logger.info("🤖 OpenAI Sora 클라이언트 초기화 완료")
+        # 비동기 클라이언트 사용
+        self.client = AsyncOpenAI(api_key=self.api_key)
+        logger.info("🤖 OpenAI Sora 비동기 클라이언트 초기화 완료")
 
     async def generate_sign_video(
-        self, prompt: str, task_id: Optional[str] = None
+        self,
+        prompt: str,
+        task_id: Optional[str] = None,
+        reference_image_url: Optional[str] = None,
+        auto_upload_to_azure: bool = True,
     ) -> Dict[str, Any]:
         """
         프롬프트를 사용하여 OpenAI Sora로 비디오 생성
@@ -53,6 +60,8 @@ class SoraService:
         Args:
             prompt: 수어 비디오 프롬프트
             task_id: 작업 ID (로깅용)
+            reference_image_url: 원본 참조 이미지 URL (첫 프레임 캐릭터 고정용)
+            auto_upload_to_azure: MP4 생성 후 Azure 자동 업로드 여부 (기본: True)
 
         Returns:
             Dict: 생성 결과
@@ -66,37 +75,81 @@ class SoraService:
         try:
             logger.info(f"🎬 Sora 비디오 생성 시작: {task_id or 'unknown'}")
             logger.info(f"📝 프롬프트 길이: {len(prompt)}자")
+            requested_size = "1280x720"
+
+            input_reference = None
+            reference_image_used = False
+            if reference_image_url:
+                try:
+                    input_reference = await self._build_input_reference(
+                        reference_image_url,
+                        requested_size,
+                    )
+                    reference_image_used = True
+                    logger.info("🖼️ 참조 이미지 연결 완료 (input_reference)")
+                except Exception as ref_err:
+                    logger.warning(
+                        f"⚠️ 참조 이미지 연결 실패, 텍스트 프롬프트로 계속 진행: {ref_err}"
+                    )
 
             # API 호출
-            video_url = None
             try:
-                response = self.client.videos.generate(
-                    model="sora-video-01",  # OpenAI Sora model identifier
+                # sora-2 모델 사용, 비동기 폴링 (생성 시간 대기)
+                response = await self.client.videos.create_and_poll(
+                    model="sora-2",
                     prompt=prompt,
+                    input_reference=input_reference,
+                    seconds="4",
+                    size=requested_size,
                 )
                 logger.info(f"⏳ Sora 응답 완료: {response}")
-
-                if hasattr(response, "data") and len(response.data) > 0:
-                    video_url = response.data[0].url
-            except AttributeError:
-                logger.warning(
-                    "⚠️ 현재 OpenAI Python SDK에서 'videos.generate' 속성을 지원하지 않습니다. (Sora API 미지원). 테스트용 Mock URL을 반환합니다."
+            except Exception as e:
+                logger.error(
+                    f"⚠️ 현재 OpenAI Python SDK에서 Sora API 오류 발생. 예외: {str(e)}"
                 )
-                # Mock URL 반환 (테스트용)
-                video_url = "https://mock-sora-test-video.com/sample_sora_video.mp4"
-                await asyncio.sleep(2)  # 생성 시간 모방
+                raise SoraServiceError(f"Sora API 호출 실패: {str(e)}")
 
-            if not video_url:
-                raise SoraServiceError("Sora API 응답에 video URL이 없습니다.")
+            status = getattr(response, "status", None)
+            if status != "completed":
+                error_obj = getattr(response, "error", None)
+                raise SoraServiceError(
+                    f"Sora 비디오 생성 미완료(status={status}, error={error_obj})"
+                )
 
-            # Download and upload to Azure
-            azure_url = await self._download_and_upload_to_azure(video_url, task_id)
+            video_id = getattr(response, "id", None)
+            if not video_id:
+                raise SoraServiceError("Sora API 응답에 video id가 없습니다.")
+
+            binary_content = await self.client.videos.download_content(video_id)
+            video_bytes = binary_content.content
+            content_type = binary_content.response.headers.get("content-type", "video/mp4")
+
+            if len(video_bytes) < 1000:
+                raise SoraServiceError(
+                    f"다운로드된 비디오가 비정상적으로 작습니다 ({len(video_bytes)} bytes)"
+                )
+
+            azure_url: Optional[str] = None
+            upload_status = "skipped"
+
+            if auto_upload_to_azure:
+                azure_url = await self._upload_video_bytes_to_azure(
+                    video_bytes=video_bytes,
+                    content_type=content_type,
+                    task_id=task_id,
+                )
+                upload_status = "uploaded"
+            else:
+                logger.warning("⚠️ Azure 자동 업로드 비활성화(auto_upload_to_azure=False)")
 
             return {
                 "status": "success",
                 "video_url": azure_url,
+                "azure_upload_status": upload_status,
                 "prompt": prompt,
                 "task_id": task_id,
+                "reference_image_url": reference_image_url,
+                "reference_image_used": reference_image_used,
                 "created_at": datetime.now().isoformat(),
                 "note": "Sora API Video Generation",
             }
@@ -108,28 +161,58 @@ class SoraService:
                 "error": str(e),
                 "prompt": prompt,
                 "task_id": task_id,
+                "azure_upload_status": "error",
+                "reference_image_url": reference_image_url,
                 "created_at": datetime.now().isoformat(),
                 "note": f"Sora API 오류: {str(e)}",
             }
 
-    async def _download_and_upload_to_azure(
-        self, video_url: str, task_id: Optional[str]
-    ) -> str:
-        """Download video from URL and upload to Azure Blob Storage"""
+    async def _build_input_reference(self, reference_image_url: str, requested_size: str):
+        """원본 이미지 URL을 Sora input_reference 형식으로 변환"""
+        timeout = httpx.Timeout(20.0, connect=10.0)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            response = await client.get(reference_image_url)
+            response.raise_for_status()
+
+        image_bytes = response.content
+        if not image_bytes:
+            raise SoraServiceError("참조 이미지 바이트가 비어 있습니다.")
+
+        width, height = self._parse_size(requested_size)
+        resized_bytes = self._resize_image_to_match(image_bytes, width, height)
+
+        content_type = "image/jpeg"
+        filename = "reference_image.jpg"
+        return (filename, resized_bytes, content_type)
+
+    def _parse_size(self, size: str) -> tuple[int, int]:
+        """'1280x720' 형식 문자열을 (width, height)로 파싱"""
         try:
-            async with httpx.AsyncClient(timeout=300, follow_redirects=True) as client:
-                response = await client.get(video_url)
-                response.raise_for_status()
+            width_str, height_str = size.lower().split("x")
+            return int(width_str), int(height_str)
+        except Exception as e:
+            raise SoraServiceError(f"잘못된 size 형식: {size} ({e})")
 
-                content_type = response.headers.get("content-type", "video/mp4")
-                video_bytes = response.content
+    def _resize_image_to_match(self, image_bytes: bytes, width: int, height: int) -> bytes:
+        """참조 이미지를 지정 해상도로 리사이즈하여 JPEG 바이트로 반환"""
+        try:
+            with Image.open(BytesIO(image_bytes)) as image:
+                converted = image.convert("RGB")
+                resized = converted.resize((width, height), Image.Resampling.LANCZOS)
+                output = BytesIO()
+                resized.save(output, format="JPEG", quality=95)
+                return output.getvalue()
+        except Exception as e:
+            raise SoraServiceError(f"참조 이미지 리사이즈 실패: {e}")
 
-                if len(video_bytes) < 1000:
-                    logger.warning(
-                        f"파일이 너무 작습니다 (크기: {len(video_bytes)} bytes)"
-                    )
-                    return video_url  # Return original if suspicion of invalid file
-
+    async def _upload_video_bytes_to_azure(
+        self,
+        video_bytes: bytes,
+        content_type: str,
+        task_id: Optional[str],
+    ) -> str:
+        """Upload downloaded video bytes to Azure Blob Storage"""
+        try:
             # Generate blob name
             timestamp = int(time.time())
             blob_name = f"sora-videos/sora_video_{task_id or 'unknown'}_{timestamp}.mp4"
@@ -142,16 +225,24 @@ class SoraService:
             return azure_url
 
         except Exception as e:
-            logger.error(f"❌ 비디오 렌더링/Azure 업로드 중 실패: {str(e)}")
-            return video_url  # Return original URL on failure to at least provide the video
+            logger.error(f"❌ 비디오 Azure 업로드 중 실패: {str(e)}")
+            raise SoraServiceError(f"Azure 업로드 실패: {str(e)}")
 
 
 # 편의 함수
 async def generate_sign_video(
-    prompt: str, task_id: Optional[str] = None
+    prompt: str,
+    task_id: Optional[str] = None,
+    reference_image_url: Optional[str] = None,
+    auto_upload_to_azure: bool = True,
 ) -> Dict[str, Any]:
     """
     편의 함수: 수어 비디오 생성 (Sora)
     """
     service = SoraService()
-    return await service.generate_sign_video(prompt, task_id)
+    return await service.generate_sign_video(
+        prompt,
+        task_id,
+        reference_image_url,
+        auto_upload_to_azure,
+    )

@@ -10,11 +10,16 @@ import json
 import logging
 from typing import Optional
 import threading
+from dotenv import load_dotenv
 
 from openai import OpenAI
 from app.utils.text_utils import clean_markdown_json_response
 
 logger = logging.getLogger(__name__)
+
+# Service 레이어에서도 .env를 직접 로드하여
+# FastAPI 엔트리포인트(main.py) 외 경로(Celery/스크립트)에서 동일하게 환경변수를 사용할 수 있도록 함
+load_dotenv()
 
 
 class LLMService:
@@ -23,6 +28,8 @@ class LLMService:
     환경 변수 LLM_PROVIDER에 따라 Ollama 또는 OpenAI를 사용합니다.
     - ollama: 로컬 Ollama 서버 (OpenAI 호환 API)
     - openai: 표준 OpenAI API
+
+    기본값은 OpenAI(gpt-4o)이며, 필요 시 LLM_PROVIDER=ollama로 오버라이드할 수 있습니다.
     """
 
     def __init__(
@@ -34,7 +41,7 @@ class LLMService:
     ):
         # 1. 명시적 provider 인자가 있으면 최우선
         # 2. LLM_PROVIDER 환경변수가 있으면 그 다음
-        # 3. ENVIRONMENT 환경변수에 따라 기본값 설정 (production -> openai, 그외 -> ollama)
+        # 3. 기본값은 openai
         if provider:
             self.provider = provider
         else:
@@ -42,9 +49,7 @@ class LLMService:
             if env_provider:
                 self.provider = env_provider
             else:
-                # ENVIRONMENT 체크 (기본값 dev)
-                environment = os.getenv("ENVIRONMENT", "dev").lower()
-                self.provider = "openai" if environment == "production" else "ollama"
+                self.provider = "openai"
 
         if self.provider == "ollama":
             self.base_url = base_url or os.getenv(
@@ -68,7 +73,7 @@ class LLMService:
                 raise ValueError(
                     "OPENAI_API_KEY 환경 변수가 설정되지 않았습니다."
                 )
-            self.model = model or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+            self.model = model or os.getenv("OPENAI_MODEL", "gpt-4o")
             self.base_url = None
             self.client = OpenAI(api_key=self.api_key)
             logger.info(

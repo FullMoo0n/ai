@@ -4,6 +4,7 @@ import sys
 import uuid
 import pandas as pd
 from typing import List, Tuple
+from pathlib import Path
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from openai import OpenAI
@@ -18,8 +19,13 @@ QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6333))
 COLLECTION_NAME = "sign_languages"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# 데이터 파일 경로
-DATA_FILE = "data/문화체육관광부 국립국어원_한국수어사전_한국어대응표현정보_20240909.csv"
+# 데이터 파일 경로 (cwd와 무관하게 절대 경로 사용)
+BASE_DIR = Path(__file__).resolve().parent.parent
+DATA_FILE = str(
+    BASE_DIR
+    / "data"
+    / "문화체육관광부 국립국어원_한국수어사전_한국어대응표현정보_20240909.csv"
+)
 
 
 def init_qdrant_collection(client: QdrantClient, recreate: bool = False):
