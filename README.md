@@ -1,6 +1,6 @@
 # AI 비디오 생성 API
 
-Google Veo 3를 활용한 텍스트-to-비디오 생성 API와 OCR, 문장 분리 기능을 제공합니다.
+OpenAI(Sora/LLM/Vision)를 활용한 수어 비디오 생성 API와 OCR, 문장 분리 기능을 제공합니다.
 
 ## 주요 기능
 
@@ -9,57 +9,87 @@ Google Veo 3를 활용한 텍스트-to-비디오 생성 API와 OCR, 문장 분�
 - **토큰화**: 문장을 단어 단위로 분리
 - **문장 검증**: OpenAI를 활용한 문장 분리 품질 검증
 - **문장 분석**: LLM(Ollama/OpenAI)을 활용한 한국어 문장 형태소 분석 및 비디오 프롬프트 생성
-- **비디오 생성**: Google Veo 3를 활용한 텍스트-to-비디오 생성 (동기/비동기)
-- **S3 업로드**: 생성된 비디오를 자동으로 AWS S3에 업로드
+- **비디오 생성**: OpenAI Sora 기반 텍스트-to-비디오 생성
+- **Azure 업로드**: 생성된 비디오를 Azure Blob Storage에 업로드
 
-## 새로운 기능: 비동기 비디오 생성
+## 현재 파이프라인/프롬프트 맵 (2026-03-05 기준)
 
-### Veo3 API 업데이트 (2024년 12월)
-Google의 새로운 Veo3 API 형식을 지원합니다:
+아래는 **현재 코드 기준으로 실제 연결된 흐름**입니다.
 
-- **새로운 클라이언트**: `google.genai` 패키지 사용
-- **비동기 작업 처리**: `generate_videos` API로 비디오 생성 후 작업 완료 대기
-- **GCS 통합**: Google Cloud Storage에 직접 출력
-- **이미지 참조**: 선택적으로 참조 이미지 사용 가능
+### 1) 이미지 → 수어 비디오 통합 파이프라인 (권장)
 
-#### Veo3 환경 변수 설정
-```bash
-# .env 파일에 추가
-VEO_API_KEY=your_google_api_key_here
-VEO_MODEL=veo-3.0-generate-preview
-VEO_OUTPUT_GCS_URI=gs://your-bucket/your-prefix
-```
+- 엔드포인트: `POST /process-image-to-videos`
+- 진입 코드: `app/main.py` → `IntegratedPipeline.execute()`
+- 핵심 단계:
+  1. OCR (이미지 텍스트 + image context + character_description 추출)
+  2. 문장 분할
+  3. 전체 문장 통합 토큰 처리 + Qdrant RAG 수어데이터 수집
+  4. gloss_sequence 생성 + 통합 프롬프트 생성
+  5. Sora 비디오 생성
 
-#### Veo3 API 사용 예시
-```python
-from app.services.veo_service import VeoService
+사용 프롬프트:
+- `app/templates/prompts/gemini_video_prompt.txt`
+  - 사용 위치: `app/services/prompt_template.py`의 `build_video_prompt()`
+  - 설명: `original_text`, `gloss_sequence`, `sign_data`, `image_context`, `character_description`, 메타데이터를 템플릿에 직접 치환해 데모용 프롬프트를 생성
 
-# 서비스 초기화
-veo_service = VeoService()
+### 2) 이미지 → 수어 비디오 비동기 파이프라인
 
-# 기본 비디오 생성
-result = await veo_service.generate_sign_video(
-    prompt="한국어 수어로 '안녕하세요'를 표현하는 비디오를 생성해주세요",
-    aspect_ratio="16:9"
-)
+- 엔드포인트: `POST /process-image-to-videos-legacy`
+- 진입 코드: `app/main.py` → `SyncIntegratedPipeline.execute()`
+- 핵심 단계:
+  1. OCR
+  2. 전체 텍스트 토큰/수어데이터 수집
+  3. 통합 프롬프트 생성
+  4. Sora 비디오 생성
 
-# 이미지 참조와 함께 비디오 생성
-result = await veo_service.generate_sign_video(
-    prompt="이 이미지를 참조하여 한국어 수어 비디오를 생성해주세요",
-    aspect_ratio="16:9",
-    image_gcs_uri="gs://your-bucket/reference-image.png",
-    output_gcs_uri="gs://your-bucket/output-videos/"
-)
-```
+주의:
+- `SyncIntegratedPipeline.execute()` 내부에서 `_step_process_text` 호출이 보이며, 현재 구현 본문은 `_step_tokenize_and_process` / `_step_generate_prompt`로 분리되어 있습니다.
+- 레거시 파이프라인을 운영 경로로 사용할 경우, 코드 동기화 상태를 먼저 확인하세요.
 
-### 기존 문제점
-- Veo 3 비디오 생성 시 긴 대기 시간으로 인한 타임아웃 발생
-- 동기 방식으로 인한 서버 리소스 점유
+사용 프롬프트:
+- `app/templates/prompts/gemini_video_prompt.txt`
+  - 사용 위치: `app/services/prompt_template.py`의 `build_video_prompt()`
 
-### 해결책
-- **Celery + Redis**를 활용한 비동기 작업 처리
-- 즉시 task_id 반환 후 별도 상태 조회 방식
-- 실시간 진행 상황 모니터링
+### 2-1) 기능별 테스트 엔드포인트
+
+- `POST /ocr`: OCR 단독 테스트
+- `POST /sentences`: 문장 분리 단독 테스트
+- `POST /tokens`: 토큰화 단독 테스트
+- `POST /culture/sign-description`: Qdrant RAG(임베딩 검색) 단독 테스트
+- `POST /sentences/validate`: OpenAI 기반 분리 검증
+- `POST /process-image-to-videos`: 전체 통합 파이프라인 테스트 (권장)
+- `POST /process-image-to-videos-legacy`: 레거시 파이프라인 테스트
+- `GET /pipeline-status/{task_id}`: 파이프라인 상태 확인
+- `POST /analyze-sentences`: 형태소 분석 전용 테스트
+
+### 3) 문장 분석 파이프라인
+
+- 엔드포인트: `POST /analyze-sentences`
+- 진입 코드: `app/main.py` → `GeminiService.analyze_sentences()`
+
+사용 프롬프트:
+- `app/templates/prompts/gemini_sentence_analysis.txt`
+  - 사용 위치: `app/services/gemini_service.py`의 `load_prompt_template()`
+  - 설명: 입력 텍스트를 규칙 기반 JSON 형태소 분석 결과로 유도
+
+### 현재 사용 중인 프롬프트 파일 (정리 완료)
+
+- `app/templates/prompts/gemini_video_prompt.txt`
+- `app/templates/prompts/gemini_sentence_analysis.txt`
+
+삭제된 미사용 템플릿:
+- `command_prompt.txt`
+- `question_prompt.txt`
+- `statement_prompt.txt`
+- `default_prompt.txt`
+
+## 아키텍처 메모 (Sora/OpenAI 중심)
+
+- 비디오 생성은 `app/services/sora_service.py`를 통해 **OpenAI Sora**로 수행됩니다.
+- OCR은 OpenAI Vision 기반 경로를 사용하며, 생성된 텍스트/이미지 맥락/캐릭터 설명이 프롬프트 생성에 반영됩니다.
+- 최종 비디오는 Azure Blob Storage에 업로드되어 URL로 반환됩니다.
+- 문장 분석은 `GeminiService`라는 이름을 유지하지만 내부적으로 `LLMService`(OpenAI/Ollama)를 사용합니다.
+- 데모용 비디오 프롬프트는 LLM 재작성 없이 `build_video_prompt()`에서 템플릿 직접 치환 방식으로 생성합니다.
 
 ## 설치 및 실행
 
@@ -79,22 +109,21 @@ cp .env.example .env
 ```
 
 필수 환경 변수:
-- `VEO_API_KEY`: Google Veo3 API 키 (비디오 생성용)
-- `VEO_MODEL`: Veo3 모델명 (기본: veo-3.0-generate-preview)
-- `VEO_OUTPUT_GCS_URI`: 출력 비디오 GCS URI (예: gs://your-bucket/your-prefix)
 - `LLM_PROVIDER`: LLM 제공자 (`ollama` 또는 `openai`, 기본: `openai`)
 - `OPENAI_MODEL`: OpenAI 모델명 (기본: `gpt-4o`)
 - `OLLAMA_BASE_URL`: Ollama API 주소 (기본: `http://localhost:11434/v1`)
 - `OLLAMA_MODEL`: Ollama 모델명 (기본: `qwen2.5:7b-instruct-q4_K_M`)
-- `OPENAI_API_KEY`: OpenAI API 키 (기본 LLM 동작 및 문장 검증용)
+- `OPENAI_API_KEY`: OpenAI API 키 (Sora/LLM/Vision 동작용)
 - `REDIS_URL`: Redis 연결 URL (기본: redis://localhost:6379/0)
 - `AUTO_INGEST_SIGN_DATA_ON_QDRANT_ACCESS`: Qdrant 조회 시 데이터가 비어 있으면 CSV 자동 적재 (`true`/`false`, 기본: `true`)
 
-S3 업로드를 위한 환경 변수:
-- `AWS_ACCESS_KEY_ID`: AWS 액세스 키 ID
-- `AWS_SECRET_ACCESS_KEY`: AWS 시크릿 액세스 키
-- `AWS_REGION`: AWS 리전 (기본: ap-northeast-2)
-- `S3_BUCKET_NAME`: S3 버킷 이름
+Azure 업로드를 위한 환경 변수:
+- `AZURE_STORAGE_CONNECTION_STRING`: Azure Blob Storage 연결 문자열
+- `AZURE_CONTAINER_NAME`: 업로드 대상 컨테이너명 (기본: `blob-binary`)
+
+기타 외부 연동 환경 변수:
+- `CULTURE_API_KEY`: 수어 설명 조회용 한국문화정보원 API 키
+- `VISION_API_KEY`: Google Vision OCR 경로 사용 시 필요
 
 ### 3. Redis 서버 시작
 
@@ -145,89 +174,33 @@ celery -A app.celery_app flower --port=5555
 
 ## API 사용법
 
-### 비동기 비디오 생성 (권장)
-
-#### 1. 비디오 생성 요청
+### 1) 이미지 → 수어 비디오 생성 (권장)
 
 ```bash
-curl -X POST "http://localhost:8000/veo/async" \
+curl -X POST "http://localhost:8000/process-image-to-videos" \
   -H "Content-Type: application/json" \
   -d '{
-    "prompt": "A majestic eagle soaring over snow-capped mountains at sunset",
-    "aspect_ratio": "16:9",
-    "timeout_seconds": 600
+    "s3_image_url": "https://your-bucket.s3.amazonaws.com/your-image.jpg"
   }'
 ```
 
-응답:
-```json
-{
-  "task_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "status": "queued",
-  "message": "비디오 생성 작업이 큐에 추가되었습니다. `/veo/status/{task_id}`로 상태를 확인하세요."
-}
-```
-
-#### 2. 작업 상태 조회
+### 2) 레거시 파이프라인 호출
 
 ```bash
-curl "http://localhost:8000/veo/status/a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-```
-
-진행 중인 경우:
-```json
-{
-  "task_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "status": "PROGRESS",
-  "result": null,
-  "progress": {
-    "status": "processing",
-    "message": "비디오 생성 진행중... (120초 경과)",
-    "operation": "operations/generate-video-12345",
-    "elapsed_seconds": 120
-  },
-  "error": null
-}
-```
-
-완료된 경우:
-```json
-{
-  "task_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "status": "SUCCESS",
-  "result": {
-    "status": "completed",
-    "video_uri": "https://storage.googleapis.com/your-video-uri",
-    "operation": "operations/generate-video-12345",
-    "message": "비디오 생성 완료. Gemini API를 통해 직접 다운로드 가능합니다.",
-    "error": null
-  },
-  "progress": null,
-  "error": null
-}
-```
-
-#### 3. 작업 취소 (선택사항)
-
-```bash
-curl -X DELETE "http://localhost:8000/veo/cancel/a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-```
-
-### 동기 비디오 생성
-
-기존 방식이 유지됩니다:
-
-```bash
-curl -X POST "http://localhost:8000/veo" \
+curl -X POST "http://localhost:8000/process-image-to-videos-legacy" \
   -H "Content-Type: application/json" \
   -d '{
-    "prompt": "A red panda riding a skateboard in a sunny park",
-    "aspect_ratio": "16:9",
-    "timeout_seconds": 180
+    "s3_image_url": "https://your-bucket.s3.amazonaws.com/your-image.jpg"
   }'
 ```
 
-### 문장 분석 (LLM 통합)
+### 3) 파이프라인 상태 조회
+
+```bash
+curl "http://localhost:8000/pipeline-status/{task_id}"
+```
+
+### 4) 문장 분석 (LLM 통합)
 
 설정된 LLM(Ollama 또는 OpenAI)을 사용하여 한국어 문장을 분석하고 핵심 형태소를 추출합니다:
 
@@ -325,7 +298,7 @@ pkill -f celery
 cat .env
 
 # Python에서 환경 변수 확인
-python -c "import os; print('GOOGLE_API_KEY:', bool(os.getenv('GOOGLE_API_KEY')))"
+python -c "import os; print('OPENAI_API_KEY:', bool(os.getenv('OPENAI_API_KEY')))"
 ```
 
 ## 성능 최적화

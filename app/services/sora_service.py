@@ -20,6 +20,12 @@ from app.services.azure_service import upload_stream_to_azure
 logger = logging.getLogger(__name__)
 
 
+SORA_VIDEO_OUTPUT_BLOCK = """Video output requirements:
+- Smooth, continuous sign language transitions with no abrupt pauses between signs.
+- No subtitles, no captions, and no on-screen text of any kind.
+- Keep a consistent cartoon / illustration visual style, not photorealistic."""
+
+
 class SoraServiceError(Exception):
     """Sora 서비스 에러"""
 
@@ -73,9 +79,17 @@ class SoraService:
                 - note: 추가 정보
         """
         try:
+            full_prompt = self._compose_sora_prompt(prompt)
             logger.info(f"🎬 Sora 비디오 생성 시작: {task_id or 'unknown'}")
-            logger.info(f"📝 프롬프트 길이: {len(prompt)}자")
+            logger.info(f"📝 프롬프트 길이: {len(full_prompt)}자")
             requested_size = "1280x720"
+            requested_seconds = "4"
+
+            request_metadata = {
+                "task_id": task_id or "unknown",
+                "source": "ksl-pipeline",
+                "reference_image_url": reference_image_url or "",
+            }
 
             input_reference = None
             reference_image_used = False
@@ -95,13 +109,30 @@ class SoraService:
             # API 호출
             try:
                 # sora-2 모델 사용, 비동기 폴링 (생성 시간 대기)
-                response = await self.client.videos.create_and_poll(
-                    model="sora-2",
-                    prompt=prompt,
-                    input_reference=input_reference,
-                    seconds="4",
-                    size=requested_size,
-                )
+                request_payload = {
+                    "model": "sora-2",
+                    "prompt": full_prompt,
+                    "input_reference": input_reference,
+                    "seconds": requested_seconds,
+                    "size": requested_size,
+                    "metadata": request_metadata,
+                }
+
+                try:
+                    response = await self.client.videos.create_and_poll(
+                        **request_payload
+                    )
+                except TypeError as type_error:
+                    if "metadata" in str(type_error):
+                        logger.warning(
+                            "⚠️ SDK에서 videos.create_and_poll(metadata=...)를 지원하지 않아 metadata 없이 재시도합니다."
+                        )
+                        request_payload.pop("metadata", None)
+                        response = await self.client.videos.create_and_poll(
+                            **request_payload
+                        )
+                    else:
+                        raise
                 logger.info(f"⏳ Sora 응답 완료: {response}")
             except Exception as e:
                 logger.error(
@@ -146,10 +177,11 @@ class SoraService:
                 "status": "success",
                 "video_url": azure_url,
                 "azure_upload_status": upload_status,
-                "prompt": prompt,
+                "prompt": full_prompt,
                 "task_id": task_id,
                 "reference_image_url": reference_image_url,
                 "reference_image_used": reference_image_used,
+                "request_metadata": request_metadata,
                 "created_at": datetime.now().isoformat(),
                 "note": "Sora API Video Generation",
             }
@@ -159,13 +191,28 @@ class SoraService:
             return {
                 "status": "error",
                 "error": str(e),
-                "prompt": prompt,
+                "prompt": full_prompt,
                 "task_id": task_id,
                 "azure_upload_status": "error",
                 "reference_image_url": reference_image_url,
+                "request_metadata": request_metadata,
                 "created_at": datetime.now().isoformat(),
                 "note": f"Sora API 오류: {str(e)}",
             }
+
+    def _compose_sora_prompt(self, prompt: str) -> str:
+        """Sora 공통 출력 규칙을 프롬프트 본문에 포함"""
+        stripped_prompt = (prompt or "").strip()
+        if not stripped_prompt:
+            return SORA_VIDEO_OUTPUT_BLOCK
+
+        if "Video output" in stripped_prompt or "Video output requirements" in stripped_prompt:
+            return stripped_prompt
+
+        return f"""{SORA_VIDEO_OUTPUT_BLOCK}
+
+Scene description:
+{stripped_prompt}"""
 
     async def _build_input_reference(self, reference_image_url: str, requested_size: str):
         """원본 이미지 URL을 Sora input_reference 형식으로 변환"""

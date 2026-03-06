@@ -13,6 +13,7 @@ import os
 from datetime import datetime
 
 from app.services.vision_s3 import process_s3_image_with_vision
+from app.services.openai_vision import analyze_image_context_with_openai
 from app.services.sentence_segmenter import split_sentences
 from app.services.tokenizer import tokenize
 from app.services.sign_data_service import SignDataService
@@ -53,6 +54,7 @@ class IntegratedPipeline:
         self.final_result = None
         self.source_image_url = ""
         self.image_context = ""
+        self.character_description = ""
 
         # 파이프라인 단계들 초기화
         self._initialize_steps()
@@ -128,7 +130,19 @@ class IntegratedPipeline:
             )
 
             extracted_text = result.get("text", "")
-            self.image_context = result.get("image_context", "")
+
+            try:
+                context_result = await analyze_image_context_with_openai(s3_image_url)
+                self.image_context = context_result.get("image_context", "")
+                self.character_description = context_result.get(
+                    "character_description", ""
+                )
+            except Exception as context_error:
+                logger.warning(
+                    f"이미지 맥락/캐릭터 분석 실패 (OCR은 계속 진행): {context_error}"
+                )
+                self.image_context = ""
+                self.character_description = ""
 
             if not extracted_text.strip():
                 raise PipelineError("이미지에서 텍스트를 추출할 수 없습니다")
@@ -141,6 +155,10 @@ class IntegratedPipeline:
             if self.image_context:
                 logger.info(
                     f"🖼️ 이미지 맥락 요약 길이: {len(self.image_context)}"
+                )
+            if self.character_description:
+                logger.info(
+                    f"🧸 캐릭터 설명 추출 완료: {self.character_description[:80]}"
                 )
             return extracted_text
 
@@ -276,12 +294,20 @@ class IntegratedPipeline:
 
             # 통합 프롬프트 생성
             full_text = " ".join(all_sentences)
+            gloss_sequence = " ".join(meaningful_tokens) if meaningful_tokens else full_text
             prompt_manager = get_default_prompt_manager()
-            video_prompt = prompt_manager.generate_video_prompt(
-                full_text,
-                sign_data,
+            video_prompt = prompt_manager.build_video_prompt(
+                original_text=full_text,
+                gloss_sequence=gloss_sequence,
+                sign_data=sign_data,
                 image_context=self.image_context,
+                character_description=self.character_description,
+                book_id=self.task_id,
+                page_number=1,
+                sentence_idx=0,
                 reference_image_url=self.source_image_url,
+                duration_sec=8,
+                version="demo-v1",
             )
             logger.info(f"📝 통합 프롬프트 생성 완료: {len(video_prompt)}자")
 
@@ -293,6 +319,8 @@ class IntegratedPipeline:
                 "unique_tokens": unique_tokens,
                 "sign_data": sign_data,  # 실제 API 데이터만 포함
                 "image_context": self.image_context,
+                "character_description": self.character_description,
+                "gloss_sequence": gloss_sequence,
                 "source_image_url": self.source_image_url,
                 "video_prompt": video_prompt,
                 "api_stats": {

@@ -1,43 +1,36 @@
-### **Prompt for Gemini Video Generation (Sora 2 Format)**
+You are generating a Korean Sign Language (KSL) video prompt for an AI video generation model (Sora).
 
-**[Objective]**
-Create a comprehensive video generation prompt for Korean Sign Language (KSL) videos based on the provided sentence analysis and sign language data. The output must STRICTLY follow the OpenAI Sora 2 prompt structure.
+## Character
+The signer is the CHARACTER extracted from the scanned fairy tale page image.
+- Character appearance: {{character_description}}
+- The character must visually match the illustration style of the original book page.
+- The character performs sign language using hands and upper-body movement, while keeping the character design consistent throughout.
 
-**[Input Data]**
-- **Sentence Analysis**: {{sentence_analysis}}
-- **Sign Language Data**: {{sign_data}}
-- **Image Context**: {{image_context}}
-- **Reference Image URL**: {{reference_image_url}}
+## Scene Context
+- Book page image context:
+{{image_context}}
+- Background must reflect the scene from the scanned page illustration.
+- Lighting and color palette should match the book's art style.
 
-**[Output Format Requirements (Sora 2)]**
-You must output ONLY the generated prompt following this EXACT structure, without any markdown code blocks, prefixes, or conversational text. Use English for the prompt.
+## Sign Language Content
+The character signs the following sentence in Korean Sign Language (KSL):
+- Original text: {{original_text}}
+- KSL Gloss sequence: {{gloss_sequence}}
+- Sign reference descriptions (from RAG):
+{{sign_data}}
 
-[Prose description of the scene: Describe the character from the provided reference image, their clothing, the background, and lighting/weather. Reflect the Image Context details explicitly and consistently.]
+## KSL Expression Rules
+- Follow the KSL gloss order strictly, not Korean sentence order.
+- Facial expressions are grammatically required:
+	- Questions: raised eyebrows
+	- Negation: head shake + furrowed brows
+	- Emphasis: nodding with sign
+- Signing speed: slow and clear for children.
+- Camera: fixed front-facing shot, upper body visible, both hands always in frame.
 
-Camera and Style:
-- Shot: [e.g., Medium close-up, eye-level, focused on the upper body and hands]
-- Vibe: [e.g., Cinematic, professional, clear and well-lit studio environment]
-
-Action:
-- [Action 1: The character begins performing Korean Sign Language fluidly and naturally.]
-- [Action 2: Describe the specific hand movements and facial expressions based on the sign data provided. If data is provided, describe the exact gestures. If not, describe them creatively signing the story.]
-- [Action 3: Ensure the character maintains eye contact and transitions smoothly between signs without any text or subtitles appearing anywhere.]
-
-Dialogue:
-- Character: "[The translated English or original Korean sentence they are signing]"
-
-Ambient Sound: [e.g., Quiet room tone, faint studio hum]
-
-Reference Image:
-- URL: [Reference Image URL]
-- Visual Context: [One-line summary using the provided Image Context]
-
-**[Important Guidelines]**
-1. **Never include text or subtitles**: The video must be purely visual. Do not include any subtitles, captions, or typography. 
-2. **Sign Language Accuracy**: Use the provided Sign Language Data to describe the actions in the Action section.
-3. **Consistency**: The character must maintain the exact same appearance throughout the clip. Action should be continuous.
-4. **Duration**: Design the action to fit within an 8-second timeframe.
-5. **Image Grounding**: You must include and preserve the provided Image Context in scene description, style, and action details.
-
-**[Output Prompt to Generate]**
-(Start your response exactly from the Prose description line below)
+## Video Output
+- Duration: {{duration_sec}} seconds.
+- Resolution: 1280x720.
+- Smooth transitions between signs, no abrupt pauses.
+- No subtitles, captions, or any on-screen text.
+- Keep a cartoon/illustration visual style (not photorealistic).

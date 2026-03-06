@@ -10,6 +10,7 @@ from datetime import datetime
 import asyncio
 
 from app.services.vision_s3 import process_s3_image_with_vision
+from app.services.openai_vision import analyze_image_context_with_openai
 from app.services.tokenizer import tokenize
 from app.services.sign_data_service import SignDataService
 from .prompt_template import get_default_prompt_manager
@@ -46,6 +47,7 @@ class SyncIntegratedPipeline:
         self.final_result = None
         self.source_image_url = ""
         self.image_context = ""
+        self.character_description = ""
 
         # 파이프라인 단계들 초기화
         self._initialize_steps()
@@ -112,22 +114,55 @@ class SyncIntegratedPipeline:
         try:
             logger.info(f"OCR 단계 시작: {self.task_id}")
 
-            import asyncio
-            from app.services.openai_vision import process_s3_image_with_vision
-
             try:
-                result = asyncio.run(process_s3_image_with_vision(s3_image_url))
+                result = asyncio.run(
+                    process_s3_image_with_vision(
+                        s3_url=s3_image_url,
+                        feature="TEXT_DETECTION",
+                        language_hints=["ko"],
+                        include_word_boxes=False,
+                    )
+                )
             except RuntimeError:
                 import nest_asyncio
 
                 nest_asyncio.apply()
                 loop = asyncio.get_event_loop()
                 result = loop.run_until_complete(
-                    process_s3_image_with_vision(s3_image_url)
+                    process_s3_image_with_vision(
+                        s3_url=s3_image_url,
+                        feature="TEXT_DETECTION",
+                        language_hints=["ko"],
+                        include_word_boxes=False,
+                    )
                 )
 
             extracted_text = result.get("text", "")
-            self.image_context = result.get("image_context", "")
+
+            try:
+                self.image_context = ""
+                self.character_description = ""
+                try:
+                    context_result = asyncio.run(
+                        analyze_image_context_with_openai(s3_image_url)
+                    )
+                except RuntimeError:
+                    import nest_asyncio
+
+                    nest_asyncio.apply()
+                    loop = asyncio.get_event_loop()
+                    context_result = loop.run_until_complete(
+                        analyze_image_context_with_openai(s3_image_url)
+                    )
+
+                self.image_context = context_result.get("image_context", "")
+                self.character_description = context_result.get(
+                    "character_description", ""
+                )
+            except Exception as context_error:
+                logger.warning(
+                    f"이미지 맥락/캐릭터 분석 실패 (OCR은 계속 진행): {context_error}"
+                )
 
             if not extracted_text.strip():
                 raise SyncPipelineError("이미지에서 텍스트를 추출할 수 없습니다")
@@ -148,6 +183,11 @@ class SyncIntegratedPipeline:
             step.error = str(e)
             step.completed_at = datetime.now()
             raise
+
+    def _step_process_text(self, text: str) -> Dict[str, Any]:
+        """레거시 execute()와의 연결을 위한 브리지"""
+        token_result = self._step_tokenize_and_process(text)
+        return self._step_generate_prompt(token_result)
 
     def _step_tokenize_and_process(self, text: str) -> Dict[str, Any]:
         """2단계: 전체 텍스트 토큰화 및 수어 데이터 조회"""
@@ -234,11 +274,19 @@ class SyncIntegratedPipeline:
 
             # 전체 텍스트에 대한 프롬프트 생성 (Gemini AI 사용)
             prompt_manager = get_default_prompt_manager()
-            video_prompt = prompt_manager.generate_video_prompt(
-                text,
-                sign_data,
+            gloss_sequence = " ".join(tokens) if tokens else text
+            video_prompt = prompt_manager.build_video_prompt(
+                original_text=text,
+                gloss_sequence=gloss_sequence,
+                sign_data=sign_data,
                 image_context=self.image_context,
+                character_description=self.character_description,
+                book_id=self.task_id,
+                page_number=1,
+                sentence_idx=0,
                 reference_image_url=self.source_image_url,
+                duration_sec=8,
+                version="demo-v1",
             )
 
             logger.info(f"📝 생성된 프롬프트 길이: {len(video_prompt)}자")
@@ -250,6 +298,8 @@ class SyncIntegratedPipeline:
                 "tokens": tokens,
                 "sign_data": sign_data,
                 "image_context": self.image_context,
+                "character_description": self.character_description,
+                "gloss_sequence": gloss_sequence,
                 "source_image_url": self.source_image_url,
                 "video_prompt": video_prompt,
             }

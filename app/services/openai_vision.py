@@ -16,6 +16,109 @@ class OpenAIVisionError(Exception):
     pass
 
 
+def _resolve_public_image_url(image_url: str) -> str:
+    """Azure Blob URL 또는 일반 URL을 OpenAI Vision 입력용 공개 URL로 정규화"""
+    public_url = image_url
+    if "blob.core.windows.net" in image_url:
+        logger.info(f"Azure 이미지 URL 감지: {image_url}")
+        if not check_azure_blob_exists(image_url):
+            logger.warning(
+                f"Azure Blob을 찾을 수 없거나 접근할 수 없습니다: {image_url}"
+            )
+
+        try:
+            public_url = get_azure_public_url(image_url, expires_in_hours=1)
+        except Exception as e:
+            logger.warning(
+                f"SAS URL 발급 실패(public 컨테이너로 가정하고 원본 URL 사용): {e}"
+            )
+    else:
+        logger.info(f"일반 웹 이미지 URL 감지: {image_url}")
+
+    return public_url
+
+
+async def analyze_image_context_with_openai(image_url: str) -> Dict[str, str]:
+    """이미지 분위기/캐릭터 정보를 OpenAI Vision으로 분석"""
+    try:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise OpenAIVisionError("OPENAI_API_KEY 환경변수가 설정되지 않았습니다.")
+
+        client = AsyncOpenAI(api_key=api_key)
+        public_url = _resolve_public_image_url(image_url)
+
+        image_context = ""
+        character_description = ""
+
+        try:
+            context_prompt = (
+                "이 이미지를 기반으로 영상 생성에 바로 사용할 수 있도록, "
+                "다음 요소만 1~3문장으로 요약해줘: "
+                "(1) 주체/인물 외형, (2) 배경/공간, (3) 조명/색감. "
+                "텍스트를 읽거나 번역하지 말고 시각 정보만 설명해."
+            )
+            context_response = await client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": context_prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": public_url, "detail": "high"},
+                            },
+                        ],
+                    }
+                ],
+                max_tokens=300,
+            )
+            image_context = (context_response.choices[0].message.content or "").strip()
+            logger.info("OpenAI 이미지 맥락 요약 완료")
+        except Exception as context_error:
+            logger.warning(f"이미지 맥락 요약 실패: {context_error}")
+
+        try:
+            character_prompt = (
+                "Describe the main character in this illustration in detail: "
+                "their species/type, clothing, color, size, and facial expression. "
+                "Keep it under 30 words. English only."
+            )
+            character_response = await client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": character_prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": public_url, "detail": "high"},
+                            },
+                        ],
+                    }
+                ],
+                max_tokens=120,
+            )
+            character_description = (
+                character_response.choices[0].message.content or ""
+            ).strip()
+            logger.info("OpenAI 캐릭터 설명 추출 완료")
+        except Exception as character_error:
+            logger.warning(f"캐릭터 설명 추출 실패: {character_error}")
+
+        return {
+            "image_context": image_context,
+            "character_description": character_description,
+            "public_url": public_url,
+        }
+
+    except Exception as e:
+        logger.error(f"OpenAI 이미지 맥락/캐릭터 분석 중 오류: {str(e)}")
+        raise OpenAIVisionError(f"OpenAI 이미지 맥락/캐릭터 분석 실패: {str(e)}")
+
+
 async def process_s3_image_with_vision(
     s3_url: str,
     feature: str = "TEXT_DETECTION",
@@ -46,25 +149,7 @@ async def process_s3_image_with_vision(
             raise OpenAIVisionError("OPENAI_API_KEY 환경변수가 설정되지 않았습니다.")
 
         client = AsyncOpenAI(api_key=api_key)
-
-        # URL 처리 - Azure Blob Storage인 경우와 일반 URL인 경우 처리
-        public_url = s3_url
-        if "blob.core.windows.net" in s3_url:
-            logger.info(f"Azure 이미지 OCR 처리 시작: {s3_url}")
-            if not check_azure_blob_exists(s3_url):
-                logger.warning(
-                    f"Azure Blob을 찾을 수 없거나 접근할 수 없습니다: {s3_url}"
-                )
-
-            # 읽기 전용 SAS 토큰이 포함된 URL 생성 시도 (만약 public 컨테이너가 아니라면 필요함)
-            try:
-                public_url = get_azure_public_url(s3_url, expires_in_hours=1)
-            except Exception as e:
-                logger.warning(
-                    f"SAS URL 발급 실패(public 컨테이너로 가정하고 원본 URL 사용): {e}"
-                )
-        else:
-            logger.info(f"일반 웹 이미지 URL 감지: {s3_url}")
+        public_url = _resolve_public_image_url(s3_url)
 
         prompt = "Extract all the text from this image exactly as it appears. Ensure the line breaks and spacing reflect the original structure. Only return the text, no other descriptions."
         if language_hints and "ko" in language_hints:
@@ -101,39 +186,15 @@ async def process_s3_image_with_vision(
                     lines = lines[:-1]
                 extracted_text = "\n".join(lines).strip()
 
-        image_context = ""
-        try:
-            context_prompt = (
-                "이 이미지를 기반으로 영상 생성에 바로 사용할 수 있도록, "
-                "다음 요소만 1~3문장으로 요약해줘: "
-                "(1) 주체/인물 외형, (2) 배경/공간, (3) 조명/색감. "
-                "텍스트를 읽거나 번역하지 말고 시각 정보만 설명해."
-            )
-            context_response = await client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": context_prompt},
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": public_url, "detail": "high"},
-                            },
-                        ],
-                    }
-                ],
-                max_tokens=300,
-            )
-            image_context = (context_response.choices[0].message.content or "").strip()
-            logger.info("OpenAI 이미지 맥락 요약 완료")
-        except Exception as context_error:
-            logger.warning(f"이미지 맥락 요약 실패 (OCR은 계속 진행): {context_error}")
+        context_result = await analyze_image_context_with_openai(s3_url)
+        image_context = context_result.get("image_context", "")
+        character_description = context_result.get("character_description", "")
 
         result = {
             "success": True,
             "text": extracted_text,
             "image_context": image_context,
+            "character_description": character_description,
             "s3_url": s3_url,  # (호환성 유지용 키)
             "image_url": s3_url,
             "public_url": public_url,

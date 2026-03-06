@@ -1,11 +1,9 @@
 import os
-import re
 import logging
+import re
 from typing import Dict, List, Any, Optional
 from pathlib import Path
 import jinja2
-
-from .llm_service import get_llm_service
 
 logger = logging.getLogger(__name__)
 
@@ -107,116 +105,110 @@ class PromptTemplateManager:
         except jinja2.TemplateError as e:
             raise TemplateRenderError(f"템플릿 렌더링 실패 ({template_name}): {str(e)}")
 
-    def generate_video_prompt(
+    def build_video_prompt(
         self,
-        sentence: str,
+        original_text: str,
+        gloss_sequence: str,
         sign_data: List[Dict[str, Any]],
-        image_context: Optional[str] = None,
+        image_context: str,
+        character_description: str,
+        book_id: str,
+        page_number: int,
+        sentence_idx: int,
         reference_image_url: Optional[str] = None,
-        template_name: Optional[str] = None,
+        duration_sec: int = 8,
+        version: str = "v1",
     ) -> str:
-        """문장과 수어 데이터로 비디오 생성 프롬프트 생성
-        gemini_video_prompt.txt 템플릿을 사용하여 Gemini AI가 프롬프트를 생성합니다.
+        """데모용 Sora 비디오 프롬프트를 템플릿에 즉시 렌더링하여 생성합니다.
 
-        Args:
-            sentence: 변환할 문장
-            sign_data: 수어 데이터 리스트
-            image_context: 원본 이미지의 시각 맥락 요약 (인물/배경/조명)
-            reference_image_url: 참조 이미지 URL
-            template_name: 사용할 템플릿 이름 (사용되지 않음, 항상 gemini_video_prompt 사용)
-
-        Returns:
-            str: 생성된 비디오 프롬프트
+        LLM 재작성 단계를 거치지 않고 템플릿 값을 직접 치환해
+        일관된 출력 포맷을 보장합니다.
         """
         try:
-            # gemini_video_prompt.txt 템플릿 로드
             video_prompt_template = self._load_gemini_video_template()
+            sign_data_str = self._format_sign_data(sign_data)
 
-            # 문장 분석 데이터 준비 (형태소 분석은 여기서는 단순화)
-            sentence_analysis = f"문장: '{sentence}' (길이: {len(sentence)}자)"
+            replacements = {
+                "original_text": original_text,
+                "gloss_sequence": gloss_sequence,
+                "sign_data": sign_data_str,
+                "image_context": self._normalize_multiline_text(image_context)
+                or "No additional visual context provided.",
+                "character_description": character_description
+                or "storybook illustrated character",
+                "duration_sec": str(duration_sec),
+                "book_id": book_id,
+                "page_number": str(page_number),
+                "sentence_idx": str(sentence_idx),
+                "version": version,
+                "reference_image_url": reference_image_url or "N/A",
+            }
 
-            # 수어 데이터 포맷팅
-            if sign_data:
-                sign_data_formatted = []
-                for item in sign_data:
-                    if "word" in item and "description" in item:
-                        sign_data_formatted.append(
-                            f'- Word: "{item["word"]}" - {item["description"]}'
-                        )
-                sign_data_str = "\n".join(sign_data_formatted)
-            else:
-                sign_data_str = (
-                    "No specific sign language details provided from Culture API."
-                )
+            rendered = video_prompt_template
+            for key, value in replacements.items():
+                rendered = self._replace_template_var(rendered, key, value)
 
-            # 템플릿 변수 치환
-            template_with_data = video_prompt_template.replace(
-                "{{sentence_analysis}}", sentence_analysis
-            )
-            template_with_data = template_with_data.replace(
-                "{{sign_data}}", sign_data_str
-            )
-            template_with_data = template_with_data.replace(
-                "{{image_context}}",
-                (image_context or "No additional visual context provided."),
-            )
-            template_with_data = template_with_data.replace(
-                "{{reference_image_url}}", (reference_image_url or "N/A")
-            )
-
-            # LLMService를 사용하여 프롬프트 생성
-            try:
-                llm = get_llm_service()
-
-                logger.info(
-                    f"🤖 LLM에게 비디오 프롬프트 생성 요청: '{sentence[:30]}...'"
-                )
-                generated_prompt = llm.generate_text(
-                    prompt=template_with_data,
-                    system_prompt="You are an expert at creating detailed video generation prompts for Korean Sign Language videos.",
-                    temperature=0.7,
-                )
-
-                if generated_prompt:
-                    logger.info(f"✅ LLM 프롬프트 생성 완료: {len(generated_prompt)}자")
-                    return generated_prompt
-                else:
-                    # 빈 응답은 비정상 상황일 수 있으므로, 디버깅을 위한 LLM 컨텍스트를 함께 로그로 남긴다.
-                    provider = getattr(llm, "provider", None)
-                    model = getattr(llm, "model", None) or getattr(
-                        llm, "model_name", None
-                    )
-                    llm_class = llm.__class__.__name__
-                    logger.warning(
-                        "⚠️ LLM 응답이 비어있음, 폴백 프롬프트 사용 (provider=%s, model=%s, llm_class=%s)",
-                        provider,
-                        model,
-                        llm_class,
-                    )
-                    return self._create_fallback_prompt(
-                        sentence,
-                        sign_data,
-                        image_context=image_context,
-                        reference_image_url=reference_image_url,
-                    )
-
-            except Exception as e:
-                logger.error(f"❌ LLM 프롬프트 생성 중 오류: {e}")
-                return self._create_fallback_prompt(
-                    sentence,
-                    sign_data,
-                    image_context=image_context,
-                    reference_image_url=reference_image_url,
-                )
+            return rendered.strip()
 
         except Exception as e:
             logger.error(f"❌ 비디오 프롬프트 생성 중 오류: {e}")
             return self._create_fallback_prompt(
-                sentence,
-                sign_data,
+                original_text=original_text,
+                gloss_sequence=gloss_sequence,
+                sign_data=sign_data,
                 image_context=image_context,
+                character_description=character_description,
+                book_id=book_id,
+                page_number=page_number,
+                sentence_idx=sentence_idx,
                 reference_image_url=reference_image_url,
+                duration_sec=duration_sec,
+                version=version,
             )
+
+    def _replace_template_var(self, content: str, key: str, value: str) -> str:
+        """템플릿 변수 치환: {{key}} 및 {key} 형식을 모두 지원."""
+        return content.replace(f"{{{{{key}}}}}", value).replace(f"{{{key}}}", value)
+
+    def _format_sign_data(self, sign_data: List[Dict[str, Any]]) -> str:
+        """RAG 결과를 프롬프트 텍스트 블록으로 변환"""
+        if not sign_data:
+            return "- No specific sign language details provided from RAG."
+
+        lines = []
+        for item in sign_data:
+            word = item.get("word")
+            description = item.get("description")
+            if word and description:
+                lines.append(f"- {word}: {description}")
+
+        if not lines:
+            return "- No valid sign descriptions found from RAG."
+        return "\n".join(lines)
+
+    def _normalize_multiline_text(self, value: str) -> str:
+        """멀티라인 텍스트의 들여쓰기/공백을 정규화"""
+        if not value:
+            return ""
+
+        normalized_newline = value.replace("\r\n", "\n").replace("\r", "\n")
+        lines = [line.strip() for line in normalized_newline.split("\n")]
+
+        compact_lines: List[str] = []
+        previous_blank = False
+
+        for line in lines:
+            if not line:
+                if not previous_blank:
+                    compact_lines.append("")
+                previous_blank = True
+                continue
+
+            compact_lines.append(line)
+            previous_blank = False
+
+        compact_text = "\n".join(compact_lines).strip()
+        return re.sub(r"[ \t]+", " ", compact_text)
 
     def _load_gemini_video_template(self) -> str:
         """
@@ -241,138 +233,48 @@ class PromptTemplateManager:
 
     def _create_fallback_prompt(
         self,
-        sentence: str,
+        original_text: str,
+        gloss_sequence: str,
         sign_data: List[Dict[str, Any]],
-        image_context: Optional[str] = None,
+        image_context: str,
+        character_description: str,
+        book_id: str,
+        page_number: int,
+        sentence_idx: int,
         reference_image_url: Optional[str] = None,
+        duration_sec: int = 8,
+        version: str = "v1",
     ) -> str:
-        """
-        폴백용 기본 프롬프트를 생성합니다. (Sora 2 포맷)
+        """템플릿 렌더링 실패 시 데모용 폴백 프롬프트"""
+        sign_data_str = self._format_sign_data(sign_data)
+        normalized_context = self._normalize_multiline_text(image_context)
+        return f"""Generate a Korean Sign Language (KSL) video scene.
 
-        Args:
-            sentence: 문장
-            sign_data: 수어 데이터
+    Character:
+    - {character_description or 'storybook illustrated character'}
+    - Keep the same illustrated character design consistently throughout the video.
 
-        Returns:
-            str: 폴백 프롬프트
-        """
-        prompt = f"""Character performing Korean Sign Language (KSL) based on the reference image. The clothing, background, and lighting are clear and well-lit.
+    Scene:
+    - {normalized_context or 'No additional visual context provided.'}
+    - Match the original storybook illustration style and mood.
 
-Camera and Style:
-- Shot: Medium close-up, eye-level, focusing on the upper body and hands
-- Vibe: Professional, clean studio, educational
+    Signing content:
+    - Original text: {original_text}
+    - KSL gloss sequence (strict order): {gloss_sequence}
+    - Sign references:
+    {sign_data_str}
 
-Action:
-- The character begins performing Korean Sign Language fluidly and naturally to convey the following meaning: "{sentence}" """
+    Performance rules:
+    - Use natural KSL facial expressions and body language.
+    - Signing speed: slow and clear for children.
+    - Camera: fixed front-facing, upper body visible, both hands always in frame.
 
-        # 수어 데이터 추가
-        if sign_data:
-            prompt += "\n- Specific sign language movements:"
-            for item in sign_data:
-                if "word" in item and "description" in item:
-                    prompt += f"\n  * {item['word']}: {item['description']}"
-        else:
-            prompt += "\n- The character creatively signs the story using appropriate interpretative gestures."
-
-        prompt += f"""
-- Ensure the character maintains eye contact and transitions smoothly between signs without any text or subtitles appearing anywhere.
-
-Dialogue:
-- Character: "{sentence}"
-
-Ambient Sound: Quiet room tone
-
-Reference Image URL: {reference_image_url or 'N/A'}
-
-Visual Context from Reference Image:
-{image_context or 'No additional visual context provided.'}
-"""
-        return prompt
-
-    def _select_template_for_sentence(self, sentence: str) -> str:
-        """문장 유형에 따라 적절한 템플릿 선택
-
-        Args:
-            sentence: 분석할 문장
-
-        Returns:
-            str: 선택된 템플릿 이름
-        """
-        sentence = sentence.strip()
-
-        # 질문 문장 감지
-        if self._is_question(sentence):
-            return "question_prompt"
-
-        # 명령 문장 감지
-        if self._is_command(sentence):
-            return "command_prompt"
-
-        # 기본 평서문
-        return "statement_prompt"
-
-    def _is_question(self, sentence: str) -> bool:
-        """질문 문장 여부 확인
-
-        Args:
-            sentence: 확인할 문장
-
-        Returns:
-            bool: 질문 문장 여부
-        """
-        # 물음표로 끝나는 경우
-        if sentence.endswith("?") or sentence.endswith("？"):
-            return True
-
-        # 의문사가 포함된 경우
-        question_words = [
-            "무엇",
-            "뭐",
-            "언제",
-            "어디",
-            "누구",
-            "왜",
-            "어떻게",
-            "어떤",
-            "몇",
-            "얼마",
-            "어느",
-            "어디서",
-            "누가",
-            "언제부터",
-            "언제까지",
-        ]
-
-        return any(q_word in sentence for q_word in question_words)
-
-    def _is_command(self, sentence: str) -> bool:
-        """명령 문장 여부 확인
-
-        Args:
-            sentence: 확인할 문장
-
-        Returns:
-            bool: 명령 문장 여부
-        """
-        # 명령형 어미 패턴
-        command_patterns = [
-            r".*라$",  # ~라
-            r".*해라$",  # ~해라
-            r".*하세요$",  # ~하세요
-            r".*가세요$",  # ~가세요
-            r".*하십시오$",  # ~하십시오
-            r".*해$",  # ~해
-            r".*하자$",  # ~하자
-            r".*해줘$",  # ~해줘
-            r".*가자$",  # ~가자
-            r".*와$",  # ~와
-            r".*오세요$",  # ~오세요
-            r".*읽어라$",  # ~읽어라
-            r".*보세요$",  # ~보세요
-            r".*드세요$",  # ~드세요
-        ]
-
-        return any(re.match(pattern, sentence) for pattern in command_patterns)
+    Video output:
+    - Duration: {duration_sec} seconds
+    - Resolution: 1280x720
+    - Smooth sign transitions, no abrupt pauses.
+    - No subtitles, captions, or any text overlay.
+    - Keep cartoon/illustration visual style (not photorealistic)."""
 
     def list_available_templates(self) -> List[str]:
         """사용 가능한 템플릿 목록 반환

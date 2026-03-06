@@ -329,7 +329,7 @@ class PipelineResultResponse(BaseModel):
     ### 특징:
     - **동기 처리**: 요청 시 즉시 전체 파이프라인 실행 후 결과 반환
     - **Gemini AI**: 고품질 문장 분석 및 프롬프트 생성
-    - **Veo3 통합**: Gemini 프롬프트를 직접 Sora에 전달
+    - **Sora 통합**: Gemini 프롬프트를 직접 Sora에 전달
     - **에러 처리**: Sora API 오류 시 모의 결과 생성 또는 예외 처리
     """,
 )
@@ -435,7 +435,7 @@ async def process_image_to_videos_gemini_sora(request: PipelineRequest):
     2. **전체 토큰화**: 문장 분할 없이 전체 텍스트를 한번에 토큰화
     3. **수어 데이터 조회**: 모든 토큰에 대한 수어 설명 수집
     4. **Gemini 프롬프트 생성**: 전체 텍스트와 수어 데이터로 단일 프롬프트 생성
-    5. **VEO 비디오 생성**: Gemini 프롬프트로 한 개의 통합 수어 동영상 생성
+    5. **Sora 비디오 생성**: Gemini 프롬프트로 한 개의 통합 수어 동영상 생성
     6. **S3 업로드**: 생성된 동영상을 S3에 업로드
 
     ### 주요 개선사항:
